@@ -1,0 +1,22 @@
+# Streamlit theme — base hue is overridden by the glassmorphism CSS in
+# omni/dashboard/theme.py. We set `base = "auto"` so Streamlit follows the
+# user's OS dark/light preference; the injected CSS layers cyan/violet
+# accents on top of either base.
+[theme]
+base = "dark"
+primaryColor = "#06b6d4"
+backgroundColor = "#0b1224"
+secondaryBackgroundColor = "#111a30"
+textColor = "#e2e8f0"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+runOnSave = true
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"

@@ -1,0 +1,96 @@
+# Omni_Stocks instrument universe (v1: 64 instruments total)
+# Tickers use yfinance convention except where noted.
+
+asset_classes:
+  india:
+    suffix: ".NS"   # NSE
+    tickers:
+      - RELIANCE
+      - TCS
+      - HDFCBANK
+      - INFY
+      - ICICIBANK
+      - HINDUNILVR
+      - SBIN
+      - BHARTIARTL
+      - ITC
+      - LT
+      - KOTAKBANK
+      - AXISBANK
+      - ASIANPAINT
+      - MARUTI
+      - SUNPHARMA
+      - TITAN
+      - BAJFINANCE
+      - WIPRO
+      - HCLTECH
+      - ULTRACEMCO
+
+  us:
+    suffix: ""
+    tickers:
+      - AAPL
+      - MSFT
+      - GOOGL
+      - AMZN
+      - META
+      - NVDA
+      - TSLA
+      - JPM
+      - V
+      - JNJ
+      - WMT
+      - PG
+      - UNH
+      - HD
+      - MA
+      - DIS
+      - BAC
+      - XOM
+      - CVX
+      - PFE
+      - KO
+      - PEP
+      - NFLX
+      - AMD
+      - ORCL
+      - CRM
+      - ADBE
+      - INTC
+      - CSCO
+      - QCOM
+
+  crypto:
+    suffix: "-USD"
+    tickers:
+      - BTC
+      - ETH
+      - BNB
+      - SOL
+      - XRP
+      - ADA
+      - DOGE
+      - AVAX
+      - DOT
+      - LINK
+
+  fx:
+    suffix: "=X"
+    tickers:
+      - EURUSD     # EUR/USD
+      - GBPUSD     # GBP/USD
+      - USDJPY     # USD/JPY
+      - USDINR     # USD/INR
+
+# Macro / cross-asset reference series (not predicted, used as features)
+macro_tickers:
+  vix: ^VIX
+  dxy: DX-Y.NYB
+  us10y: ^TNX
+  gold: GC=F
+  oil: CL=F
+  nifty: ^NSEI
+  sp500: ^GSPC
+
+# Default lookback for historical data ingestion
+lookback_years: 8

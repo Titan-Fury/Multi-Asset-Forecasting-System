@@ -1,0 +1,48 @@
+# Rubric scoring weights per market regime.
+# Each pillar produces a 0-100 score; the weighted sum yields the rubric total.
+# Weights per regime sum to 1.0.
+
+pillars:
+  technical:
+    description: "Momentum, trend, volatility, volume signals"
+  fundamental:
+    description: "Valuation, growth, quality (where applicable)"
+  sentiment:
+    description: "News + social + LLM-aggregated signal"
+  macro:
+    description: "Cross-asset regime, VIX, yield curve, DXY"
+
+regimes:
+  bull:
+    description: "Uptrend, low vol, positive breadth"
+    weights:
+      technical: 0.40
+      fundamental: 0.20
+      sentiment: 0.25
+      macro: 0.15
+  bear:
+    description: "Downtrend, rising vol, negative breadth"
+    weights:
+      technical: 0.30
+      fundamental: 0.30
+      sentiment: 0.15
+      macro: 0.25
+  chop:
+    description: "Range-bound, indecisive, mixed signals"
+    weights:
+      technical: 0.25
+      fundamental: 0.30
+      sentiment: 0.30
+      macro: 0.15
+  crisis:
+    description: "VIX spike, correlations approach 1, deleveraging"
+    weights:
+      technical: 0.15
+      fundamental: 0.20
+      sentiment: 0.20
+      macro: 0.45
+
+# Conviction gate: minimum score to emit a signal
+gating:
+  min_conviction: 70.0
+  require_regime_supportive: true   # only emit longs in bull/chop, shorts in bear

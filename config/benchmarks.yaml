@@ -1,0 +1,82 @@
+# Cross-asset benchmark mapping for pair / hedging signals.
+#
+# For each ticker we map a primary benchmark used to compute:
+#   beta_60d, residual_z_20d, predicted_alpha = move(stock) - move(bench)
+#
+# Benchmark tickers follow yfinance convention. Asset class is implicit
+# from the section header. Anything unmapped falls back to `default`.
+
+india:
+  default: "^NSEI"          # Nifty 50
+  sectors:
+    NIFTYBEES: "^NSEI"
+    BANKBEES:  "^NSEBANK"
+  tickers:
+    HDFCBANK:   "^NSEBANK"
+    ICICIBANK:  "^NSEBANK"
+    SBIN:       "^NSEBANK"
+    KOTAKBANK:  "^NSEBANK"
+    AXISBANK:   "^NSEBANK"
+    BAJFINANCE: "^NSEBANK"
+    TCS:        "^CNXIT"
+    INFY:       "^CNXIT"
+    WIPRO:      "^CNXIT"
+    HCLTECH:    "^CNXIT"
+    GRSE:       "^NSEI"     # defence — no clean ETF on yf, fall back to broad
+    MAZDOCK:    "^NSEI"
+    HAL:        "^NSEI"
+    BEL:        "^NSEI"
+
+us:
+  default: "SPY"            # broad market
+  sectors:
+    XLK: "SPY"
+    XLF: "SPY"
+  tickers:
+    AAPL:  "XLK"
+    MSFT:  "XLK"
+    GOOGL: "XLC"
+    META:  "XLC"
+    NVDA:  "SOXX"
+    AMD:   "SOXX"
+    INTC:  "SOXX"
+    QCOM:  "SOXX"
+    AMZN:  "XLY"
+    TSLA:  "XLY"
+    HD:    "XLY"
+    DIS:   "XLC"
+    NFLX:  "XLC"
+    JPM:   "XLF"
+    BAC:   "XLF"
+    V:     "XLF"
+    MA:    "XLF"
+    JNJ:   "XLV"
+    UNH:   "XLV"
+    PFE:   "XLV"
+    XOM:   "XLE"
+    CVX:   "XLE"
+    WMT:   "XLP"
+    PG:    "XLP"
+    KO:    "XLP"
+    PEP:   "XLP"
+    ORCL:  "XLK"
+    CRM:   "XLK"
+    ADBE:  "XLK"
+    CSCO:  "XLK"
+
+crypto:
+  default: "BTC-USD"
+  tickers:
+    BTC:  "BTC-USD"         # self-benchmark = no signal
+    ETH:  "BTC-USD"
+    BNB:  "BTC-USD"
+    SOL:  "BTC-USD"
+    XRP:  "BTC-USD"
+    ADA:  "BTC-USD"
+    DOGE: "BTC-USD"
+    AVAX: "BTC-USD"
+    DOT:  "BTC-USD"
+    LINK: "BTC-USD"
+
+fx:
+  default: "DX-Y.NYB"       # DXY

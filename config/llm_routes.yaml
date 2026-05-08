@@ -1,0 +1,166 @@
+# Multi-LLM routing rules. Edit weights/fallbacks here without touching code.
+
+version: 1
+
+backends:
+  finbert:
+    type: finbert
+    model: ProsusAI/finbert
+    device: auto              # "cuda" | "cpu" | "auto"
+    batch_size: 32
+    enabled: true
+
+  ollama_qwen:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL}
+    model: qwen2.5:7b-instruct-q5_K_M
+    timeout_s: 120
+    enabled: true
+
+  ollama_phi:
+    type: ollama
+    base_url: ${OLLAMA_BASE_URL}
+    model: phi3.5:mini
+    timeout_s: 60
+    enabled: true
+
+  openrouter_llama70b:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: meta-llama/llama-3.1-70b-instruct:free
+    rate_limit:
+      rpm: 18
+      rpd: 180
+    enabled: true
+
+  openrouter_gemma:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: google/gemma-2-9b-it:free
+    rate_limit:
+      rpm: 18
+      rpd: 180
+    enabled: true
+
+  openrouter_minimax_free:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: minimax/minimax-m2.5:free
+    timeout_s: 90
+    rate_limit:
+      rpm: 12      # free tier — keep headroom
+      rpd: 200
+    enabled: true
+
+  openrouter_minimax_paid:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: minimax/minimax-m2.5
+    timeout_s: 90
+    rate_limit:
+      rpm: 60
+      rpd: 5000
+    enabled: true
+
+  groq_llama70b:
+    type: groq
+    api_key_env: GROQ_API_KEY
+    model: llama-3.3-70b-versatile
+    timeout_s: 60
+    rate_limit:
+      rpm: 28      # free tier ~30 rpm; leave headroom
+      rpd: 14000
+    enabled: true
+
+  groq_llama8b:
+    type: groq
+    api_key_env: GROQ_API_KEY
+    model: llama-3.1-8b-instant
+    timeout_s: 30
+    rate_limit:
+      rpm: 28
+      rpd: 14000
+    enabled: true
+
+  gemini_flash:
+    type: gemini
+    api_key_env: GEMINI_API_KEY
+    model: gemini-2.0-flash
+    timeout_s: 60
+    rate_limit:
+      rpm: 13      # free tier 15 rpm; leave headroom
+      rpd: 1400
+    enabled: true
+
+  gemini_flash_lite:
+    type: gemini
+    api_key_env: GEMINI_API_KEY
+    model: gemini-2.0-flash-lite
+    timeout_s: 30
+    rate_limit:
+      rpm: 28
+      rpd: 1400
+    enabled: true
+
+  cortex_sentiment:
+    type: cortex
+    connection_env: SNOWFLAKE_CONNECTION_NAME
+    function: SNOWFLAKE.CORTEX.SENTIMENT
+    enabled: true
+
+  cortex_claude:
+    type: cortex
+    connection_env: SNOWFLAKE_CONNECTION_NAME
+    function: SNOWFLAKE.CORTEX.COMPLETE
+    model: claude-3-5-sonnet
+    enabled: true
+
+  cortex_llama405:
+    type: cortex
+    connection_env: SNOWFLAKE_CONNECTION_NAME
+    function: SNOWFLAKE.CORTEX.COMPLETE
+    model: llama3.1-405b
+    enabled: true
+
+# Task -> backend chain. Primary tried first, fallback if primary errors / rate limits.
+tasks:
+  sentiment_per_article:
+    primary: [finbert]
+    fallback: []
+    cache_ttl_days: 30
+
+  theme_extraction:
+    primary: [groq_llama70b]
+    fallback: [gemini_flash, ollama_qwen, openrouter_llama70b, ollama_phi]
+    cache_ttl_days: 7
+
+  bulk_classification:
+    primary: [groq_llama8b]
+    fallback: [gemini_flash_lite, ollama_phi, ollama_qwen]
+    cache_ttl_days: 30
+
+  daily_market_synthesis:
+    primary: [cortex_claude]
+    fallback: [groq_llama70b, gemini_flash, cortex_llama405, openrouter_llama70b]
+    cache_ttl_days: 1
+    cost_class: paid
+
+  signal_explanation:
+    primary: [openrouter_minimax_free]
+    fallback: [groq_llama70b, openrouter_minimax_paid, gemini_flash, ollama_qwen, openrouter_gemma, cortex_claude]
+    cache_ttl_days: 1
+
+  cross_validation:
+    primary: [gemini_flash]
+    fallback: [groq_llama70b, openrouter_llama70b, openrouter_gemma, ollama_qwen]
+    cache_ttl_days: 7
+
+cache:
+  backend: diskcache
+  path: data/cache/llm
+  size_limit_gb: 5
+
+global:
+  default_timeout_s: 60
+  default_retries: 2
+  log_level: INFO

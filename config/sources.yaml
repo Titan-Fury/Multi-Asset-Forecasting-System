@@ -1,0 +1,66 @@
+# Data source configuration. API keys live in .env (referenced by name).
+
+prices:
+  india:
+    primary: yfinance
+    fallback: nsepython
+  us:
+    primary: yfinance
+    fallback: alpha_vantage
+  crypto:
+    primary: ccxt
+    exchange: binance
+    fallback: yfinance
+  fx:
+    primary: yfinance
+
+fundamentals:
+  india:
+    primary: yfinance     # Ticker.info
+  us:
+    primary: yfinance
+    fallback: finnhub
+
+news:
+  newsapi:
+    enabled: true
+    key_env: NEWSAPI_KEY
+    rate_limit_rpd: 100  # free tier
+  rss:
+    enabled: true
+    feeds:
+      - https://feeds.reuters.com/reuters/businessNews
+      - https://www.moneycontrol.com/rss/business.xml
+      - https://economictimes.indiatimes.com/rssfeedstopstories.cms
+      - https://feeds.bloomberg.com/markets/news.rss
+      - https://www.cnbc.com/id/10001147/device/rss/rss.html
+
+macro:
+  fred:
+    key_env: FRED_API_KEY
+    series:
+      - DGS10        # 10-year Treasury rate
+      - DGS2         # 2-year Treasury rate
+      - DEXUSEU      # USD/EUR exchange rate
+      - DCOILWTICO   # WTI crude oil
+      - VIXCLS       # VIX index
+      - T10YIE       # 10-year breakeven inflation
+      - UNRATE       # US unemployment
+      - CPIAUCSL     # US CPI
+
+social:
+  reddit:
+    enabled: false   # enable in v2 after creating PRAW app
+    subreddits:
+      - wallstreetbets
+      - stocks
+      - IndianStockMarket
+      - CryptoCurrency
+      - Forex
+  twitter:
+    enabled: false   # enable in v2
+
+storage:
+  hot_root: C:\Omni_Stocks\data
+  drive_root: Z:\
+  archive_after_days: 60
