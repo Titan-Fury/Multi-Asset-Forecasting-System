@@ -20,6 +20,22 @@ by the daily orchestrator (Phase 9). Falls back to demo data for first-run.
 """
 from __future__ import annotations
 
+# ---- sys.path bootstrap ----
+# When Streamlit launches this file directly (`streamlit run omni/dashboard/app.py`),
+# Python only adds `omni/dashboard/` to sys.path, not the project root, so
+# `from omni.dashboard import ...` fails with ModuleNotFoundError. Walk up
+# until we find the project root (the dir containing `omni/`) and prepend it.
+import sys as _sys
+from pathlib import Path as _Path
+_here = _Path(__file__).resolve()
+for _candidate in (_here.parent, *_here.parents):
+    if (_candidate / "omni" / "__init__.py").exists():
+        _root = str(_candidate)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        break
+del _sys, _Path, _here, _candidate
+
 from datetime import datetime, timezone
 
 import streamlit as st
