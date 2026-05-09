@@ -6,9 +6,24 @@ through a regime-aware rubric layered on top of calibrated XGBoost classifiers.
 Designed to run locally on Windows + an RTX 4070 Super with Google Drive cold
 storage and Snowflake Cortex for occasional heavy LLM synthesis.
 
-> **Status: under construction.** Phases 1-3 are committed. See
-> [`docs/architecture.md`](docs/architecture.md) for the full plan and
-> [`docs/setup.md`](docs/setup.md) for the manual machine setup.
+> **Status: production-ready.** All 9 dashboard tabs render real
+> predictions, multi-source ticker search is live, model stack is
+> trained.
+
+> 📚 **For a complete from-scratch explanation of every concept,
+> module, and design decision in this project — read the master
+> guide:**
+> **[`docs/interview_prep_master_guide.md`](docs/interview_prep_master_guide.md).**
+> Everything you need to defend the project end-to-end in a technical
+> interview is in there.
+
+Other docs:
+
+- [`docs/architecture.md`](docs/architecture.md) — original phase plan
+- [`docs/architecture_walkthrough.md`](docs/architecture_walkthrough.md) — module-by-module deep dive
+- [`docs/project_tree.md`](docs/project_tree.md) — annotated directory layout
+- [`docs/setup.md`](docs/setup.md) — manual machine setup (Python, Ollama, rclone, API keys)
+- [`docs/startup_guide.md`](docs/startup_guide.md) — first-run quickstart
 
 ## What it does
 
