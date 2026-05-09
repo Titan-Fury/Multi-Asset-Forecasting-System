@@ -128,6 +128,11 @@ _ALIAS_RAW: tuple[tuple[str, str, str, str], ...] = (
     ("OMAX AUTOS", "OMAXAUTO", "india", "Omax Autos"),
     ("OMAX AUTO", "OMAXAUTO", "india", "Omax Autos"),
     ("OMAXAUTO", "OMAXAUTO", "india", "Omax Autos"),
+    # Legacy / BSE-only autos (NSE delisted, still trades on BSE under
+    # a shorter symbol; fetch_prices will auto-fall back to .BO).
+    ("HINDUSTAN MOTORS", "HINDMOTORS", "india", "Hindustan Motors"),
+    ("HINDMOTORS", "HINDMOTORS", "india", "Hindustan Motors"),
+    ("HM LTD", "HINDMOTORS", "india", "Hindustan Motors"),
     # Defence / shipbuilding
     ("GARDEN REACH", "GRSE", "india", "Garden Reach Shipbuilders"),
     ("MAZAGON DOCK", "MAZDOCK", "india", "Mazagon Dock"),

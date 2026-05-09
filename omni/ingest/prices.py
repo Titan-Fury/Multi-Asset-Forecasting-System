@@ -85,10 +85,15 @@ def fetch_prices(asset_class: str, ticker: str, *, start: str, end: str) -> pd.D
             df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
     else:
         df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
-        # India small/mid caps can be listed only on BSE in Yahoo. If NSE
-        # suffix returns no rows, retry once with .BO.
-        if df.empty and asset_class == "india" and "." not in ticker:
-            df = _fetch_yfinance(f"{ticker}.BO", start, end)
+        # India small/mid caps can be listed only on BSE in Yahoo. If the
+        # NSE suffix returns no rows OR a suspiciously thin result (<30
+        # trading days, the typical "delisted phantom" Yahoo emits for
+        # invalid NSE symbols), retry once with .BO.
+        if (asset_class == "india" and "." not in ticker
+                and (df.empty or len(df) < 30)):
+            df_bo = _fetch_yfinance(f"{ticker}.BO", start, end)
+            if not df_bo.empty and len(df_bo) > len(df):
+                df = df_bo
 
     if df.empty:
         log.warning(f"No price rows fetched for {asset_class}/{ticker}")
