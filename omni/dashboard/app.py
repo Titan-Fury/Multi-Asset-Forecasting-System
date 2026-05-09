@@ -113,6 +113,47 @@ def _parse_label(label: str) -> str:
     return label.strip()
 
 
+def _render_history_pills(entries: list[dict], *, prefix: str,
+                            show_count: bool = False) -> None:
+    """Render a row of clickable pills for search-history entries.
+
+    Click → write the entry into the selectbox session_state and rerun
+    so the user lands on it ready to predict.
+    """
+    if not entries:
+        st.caption("No entries yet.")
+        return
+    arrow_map = {1: "▲", -1: "▼", 0: "●"}
+    cols = st.columns(min(len(entries), 4))
+    exch_map = {"india": "NSE", "us": "US", "crypto": "CRYPTO",
+                 "fx": "FX", "etf": "ETF", "index": "IDX"}
+    for i, e in enumerate(entries):
+        with cols[i % len(cols)]:
+            tk = e.get("ticker", "?")
+            ac = e.get("asset_class", "us")
+            ld = e.get("last_direction")
+            arrow = arrow_map.get(ld, "·") if ld is not None else "·"
+            cnt = f"  ×{e.get('hit_count', 1)}" if show_count else ""
+            label = f"{arrow} {tk}{cnt}"
+            if st.button(label, key=f"sh_{prefix}_{i}", width='stretch',
+                            help=(
+                                f"{e.get('display_name', tk)}\n"
+                                f"asset: {ac}  ·  exchange: {e.get('exchange') or '?'}\n"
+                                f"hits: {e.get('hit_count', 1)}\n"
+                                + (f"last p(up): {e.get('last_proba_up'):.3f}\n"
+                                    if e.get("last_proba_up") is not None else "")
+                                + (f"last conviction: {e.get('last_conviction'):.1f}\n"
+                                    if e.get("last_conviction") is not None else "")
+                                + (f"regime: {e.get('last_regime')}\n"
+                                    if e.get("last_regime") else "")
+                            )):
+                exch = exch_map.get(ac, "?")
+                st.session_state["predict_ticker_select"] = (
+                    f"{tk:<14}  ·  {exch:<6}  ·  {e.get('display_name', tk)}"
+                )
+                st.rerun()
+
+
 def _render_watchlist_tab() -> None:
     """User's saved favorites — predicted on demand, with a remove button.
 
@@ -273,26 +314,35 @@ def _render_predict_tab() -> None:
         unsafe_allow_html=True,
     )
 
-    # ---- Recent searches (quick-jump pills) ----
-    recent = st.session_state.get("_recent_tickers", [])
-    if recent:
-        pill_cols = st.columns(min(len(recent) + 1, 7))
-        pill_cols[0].markdown(
-            "<div style='color:var(--text-muted);font-size:0.85rem;"
-            "padding-top:6px;'>Recent:</div>",
-            unsafe_allow_html=True,
-        )
-        for i, rec in enumerate(recent[:6]):
-            label = f"{rec['ticker']} · {rec['ac']}"
-            if pill_cols[i + 1].button(label, key=f"recent_pill_{i}",
-                                          width='stretch'):
-                # Pre-fill the selectbox by writing into session_state
-                st.session_state["predict_ticker_select"] = (
-                    f"{rec['ticker']:<14}  ·  "
-                    f"{ {'india':'NSE','us':'US','crypto':'CRYPTO','fx':'FX'}.get(rec['ac'],'?'):<6}  ·  "
-                    f"{rec.get('name', rec['ticker'])}"
-                )
+    # ---- Search history (Google-style, persistent across restarts) ----
+    from omni.dashboard import searchhistory as _sh
+    recent_persist = _sh.list_recent(limit=8)
+    frequent = _sh.list_frequent(limit=5)
+    sh_stats = _sh.stats()
+
+    # Show only if there is anything to show
+    if recent_persist or frequent:
+        with st.expander(
+            f"🕒 Search history  ·  "
+            f"{sh_stats.get('total_searches', 0)} searches  ·  "
+            f"{sh_stats.get('unique_tickers', 0)} tickers"
+            + (f"  ·  most: {sh_stats.get('most_searched')}"
+                f" ({sh_stats.get('most_searched_count')}×)"
+                if sh_stats.get("most_searched") else ""),
+            expanded=False,
+        ):
+            tab_recent, tab_freq = st.tabs(["Recent", "Most searched"])
+            with tab_recent:
+                _render_history_pills(recent_persist, prefix="recent")
+            with tab_freq:
+                _render_history_pills(frequent, prefix="freq", show_count=True)
+            cc1, cc2 = st.columns([1, 1])
+            if cc1.button("Clear history", key="sh_clear", width='stretch',
+                            help="Permanently drop all stored searches"):
+                n = _sh.clear_all()
+                st.toast(f"Cleared {n} entries from history.", icon="🗑️")
                 st.rerun()
+            cc2.caption(f"Stored at `data/watchlist/search_history.json`")
 
     # Initial suggestion list (popular names) — refreshed once query typed
     initial = _suggest_options("")
@@ -398,7 +448,18 @@ def _render_predict_tab() -> None:
         st.session_state["predict_last_card"] = card.to_dict() if card else None
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
-        # Push to recent-searches list (LRU, max 6)
+        # Persistent search history (Google-style)
+        if card is not None:
+            d = card.to_dict()
+            _sh.record_search(
+                res.ticker, res.asset_class,
+                display_name=res.display_name,
+                proba_up=d.get("proba_up"),
+                direction=d.get("direction"),
+                conviction=d.get("conviction"),
+                regime=d.get("regime"),
+            )
+        # Session-only LRU pills (kept for in-session quick access)
         rec_list = st.session_state.get("_recent_tickers", [])
         rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
         rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,
@@ -424,7 +485,18 @@ def _render_predict_tab() -> None:
         st.session_state["predict_last_card"] = card.to_dict() if card else None
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
-        # Push to recent-searches list (LRU, max 6)
+        # Persistent search history (Google-style)
+        if card is not None:
+            d = card.to_dict()
+            _sh.record_search(
+                res.ticker, res.asset_class,
+                display_name=res.display_name,
+                proba_up=d.get("proba_up"),
+                direction=d.get("direction"),
+                conviction=d.get("conviction"),
+                regime=d.get("regime"),
+            )
+        # Session-only LRU pills (kept for in-session quick access)
         rec_list = st.session_state.get("_recent_tickers", [])
         rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
         rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,

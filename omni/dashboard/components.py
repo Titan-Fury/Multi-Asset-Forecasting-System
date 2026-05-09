@@ -46,12 +46,53 @@ def regime_banner(regime_df: pd.DataFrame) -> None:
     if regime_df is None or regime_df.empty:
         st.info("No regime data yet.")
         return
-    last = regime_df.sort_values("date").iloc[-1]
+    df = regime_df.sort_values("date").copy()
+    last = df.iloc[-1]
     rg = str(last["regime"]).lower()
     grad = regime_gradient(rg)
 
+    # ---- compute regime intelligence ----
+    # 1. Days in current regime (consecutive same-regime tail)
+    rev = df["regime"].astype(str).str.lower().values[::-1]
+    days_in_regime = 1
+    for r in rev[1:]:
+        if r == rg:
+            days_in_regime += 1
+        else:
+            break
+
+    # 2. Transition matrix (empirical) over the visible window
+    seq = df["regime"].astype(str).str.lower().tolist()
+    transitions: dict[str, dict[str, int]] = {}
+    for a, b in zip(seq[:-1], seq[1:]):
+        transitions.setdefault(a, {}).setdefault(b, 0)
+        transitions[a][b] += 1
+    next_probs = transitions.get(rg, {})
+    total_next = sum(next_probs.values()) or 1
+    # Top-2 most likely next states
+    next_sorted = sorted(next_probs.items(), key=lambda kv: -kv[1])[:2]
+    transition_str = "  ".join(
+        f"<span style='opacity:0.85'>{nb.upper()} <b>{(c/total_next)*100:.0f}%</b></span>"
+        for nb, c in next_sorted
+    ) or "<span style='opacity:0.7'>insufficient history</span>"
+
+    # 3. Window stats (how often current regime appeared)
+    window_share = (df["regime"].astype(str).str.lower() == rg).mean() * 100
+
+    # 4. What this regime means + suggested posture
+    regime_meaning = {
+        "bull":   ("Risk-on. Trend-following + momentum signals work well.",
+                     "favour LONG conviction signals; tighten stops below 20-DMA"),
+        "chop":   ("Range-bound. Mean-reversion edges out trend-following.",
+                     "halve position sizes; avoid breakout chasers; trade ranges"),
+        "bear":   ("Risk-off. Quality + low-vol names outperform; correlations rise.",
+                     "raise the conviction gate to 75; prefer SHORT or cash"),
+        "crisis": ("Stress regime. Liquidity premia spike; correlations -> 1.",
+                     "consider de-risking entirely; only trade highest-conviction signals"),
+    }.get(rg, ("Unknown regime.", "use default rubric weights"))
+
     # short history strip — last 30 sessions as colored squares
-    hist = regime_df.sort_values("date").tail(30)
+    hist = df.tail(30)
     blocks = "".join(
         f"<span title='{pd.to_datetime(r['date']).date()} · {r['regime']}' "
         f"style='display:inline-block;width:14px;height:22px;margin-right:2px;"
@@ -62,16 +103,28 @@ def regime_banner(regime_df: pd.DataFrame) -> None:
     st.markdown(
         f"""
         <div class='regime-banner' style='background:{grad}'>
-            <div>
+            <div style='display:flex;flex-direction:column;gap:4px'>
                 <div style='font-size:0.72rem;letter-spacing:0.18em;text-transform:uppercase;
                             opacity:0.85;font-weight:600'>Current regime</div>
                 <div class='label-big'>{rg.upper()}</div>
-                <div class='label-meta'>as of {pd.to_datetime(last['date']).date()}</div>
+                <div class='label-meta' style='opacity:0.92'>
+                    <b>{days_in_regime}</b> day{'s' if days_in_regime != 1 else ''} in regime  ·
+                    {window_share:.0f}% of last {len(df)} sessions  ·
+                    as of {pd.to_datetime(last['date']).date()}
+                </div>
+                <div class='label-meta' style='font-size:0.78rem;opacity:0.92;margin-top:4px;
+                            font-style:italic'>{regime_meaning[0]}</div>
+                <div class='label-meta' style='font-size:0.78rem;opacity:0.95;
+                            margin-top:2px'><b>Posture:</b> {regime_meaning[1]}</div>
             </div>
-            <div style='text-align:right'>
+            <div style='text-align:right;display:flex;flex-direction:column;gap:6px'>
                 <div style='font-size:0.7rem;letter-spacing:0.14em;opacity:0.85;
-                            text-transform:uppercase;margin-bottom:6px'>last 30 sessions</div>
+                            text-transform:uppercase'>last 30 sessions</div>
                 <div>{blocks}</div>
+                <div style='font-size:0.72rem;opacity:0.92;margin-top:4px;
+                            letter-spacing:0.06em'>
+                    <span style='opacity:0.75'>likely next:</span> {transition_str}
+                </div>
             </div>
         </div>
         """,
