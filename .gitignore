@@ -46,7 +46,7 @@ data/
 *.log
 *.err
 *.out
-logs/
+# (logs/ dir is handled in the scratch section below so README.md stays tracked)
 
 # --- OS / IDE ---
 .DS_Store
@@ -60,7 +60,12 @@ Thumbs.db
 _*.py
 _*.err
 _*.out
-scratch/
+scratch/*
+!scratch/README.md
+logs/*
+!logs/README.md
+secrets/*
+!secrets/README.md
 tmp/
 .cache/
 
