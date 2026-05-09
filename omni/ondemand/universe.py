@@ -241,6 +241,23 @@ def resolve(query: str) -> Resolution | None:
     if fuzzy is not None:
         return fuzzy
 
+    # ---- Multi-source live search fallback ----
+    # Before guessing US/India from string shape, try the live search APIs
+    # (Yahoo Finance + NSE + CoinGecko). If the top result is a confident
+    # match (score >= 80), use it directly so unknown global tickers like
+    # "PLTR", "TSLY", "NIO" route to the correct exchange / asset_class
+    # without the dashboard guessing wrong.
+    if len(q) >= 2:
+        try:
+            from omni.ondemand.search import search_tickers
+            hits = search_tickers(q, limit=3, india_first=True)
+            if hits and hits[0].score >= 80.0:
+                top = hits[0]
+                return Resolution(top.ticker, top.asset_class,
+                                    top.display_name, confident=False)
+        except Exception:
+            pass
+
     # If user typed a spaced company-like name, prefer India compact ticker first.
     if " " in q and qn:
         return Resolution(qn.upper(), "india", q.strip().title(), confident=False)
@@ -334,6 +351,28 @@ def suggestions(query: str, k: int = 10) -> list[Resolution]:
             if ql in alias.lower() or ql in name.lower() or ql in t.lower():
                 flat.append(Resolution(t, ac, name, confident=False))
                 seen_aliases.add((t, ac))
+
+    # ---- Multi-source live search (Yahoo Finance + NSE + CoinGecko) ----
+    # If the curated list yielded few hits and the query is at least 2 chars,
+    # query live APIs to surface anything from the global universe (the
+    # curated list is only ~150 names; the full NSE/NASDAQ universe is
+    # > 10000 symbols). Cached in-process for 30 s so typing doesn't spam.
+    if len(query.strip()) >= 2 and len(flat) < k:
+        try:
+            from omni.ondemand.search import search_tickers
+            seen_now = {(r.ticker, r.asset_class) for r in flat}
+            for sr in search_tickers(query, limit=k, india_first=True):
+                key = (sr.ticker, sr.asset_class)
+                if key in seen_now:
+                    continue
+                flat.append(Resolution(sr.ticker, sr.asset_class,
+                                         sr.display_name, confident=True))
+                seen_now.add(key)
+                if len(flat) >= k:
+                    break
+        except Exception:
+            pass
+
     return flat[:k]
 
 

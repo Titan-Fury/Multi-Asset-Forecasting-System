@@ -87,13 +87,27 @@ def _theme_override(choice: str) -> None:
 
 
 def _suggest_options(query: str) -> list[str]:
-    """Return labels for the autocomplete: 'TICKER  ·  Display name'."""
-    sugs = suggestions(query or "", k=12)
-    return [f"{s.ticker}  ·  {s.display_name}" for s in sugs]
+    """Return labels for the autocomplete: 'TICKER · EXCH · Display name'.
+
+    Uses multi-source live search (Yahoo + NSE + CoinGecko) when query is
+    long enough; falls back to curated list for empty / very-short queries.
+    """
+    sugs = suggestions(query or "", k=15)
+    out = []
+    for s in sugs:
+        # Exchange tag: try to derive from asset_class
+        exch_tag = {
+            "india": "NSE", "us": "US", "crypto": "CRYPTO",
+            "fx": "FX", "etf": "ETF", "index": "IDX",
+        }.get(s.asset_class, s.asset_class.upper())
+        # Trim long names
+        name = s.display_name[:55] + "…" if len(s.display_name) > 55 else s.display_name
+        out.append(f"{s.ticker:<14}  ·  {exch_tag:<6}  ·  {name}")
+    return out
 
 
 def _parse_label(label: str) -> str:
-    """Extract the ticker from a 'TICKER  ·  name' label, or return as-is."""
+    """Extract the ticker from a 'TICKER · EXCH · name' label, or return as-is."""
     if "·" in label:
         return label.split("·", 1)[0].strip()
     return label.strip()
@@ -252,12 +266,33 @@ def _render_predict_tab() -> None:
     st.markdown(
         "<div style='font-family:Inter,sans-serif;color:var(--text-secondary);"
         "font-size:0.92rem;margin-bottom:8px;'>"
-        "Type any ticker — US (AAPL), India (RELIANCE.NS), crypto (BTC-USD), "
-        "FX (EURUSD=X). Suggestions are drawn from the curated universe but "
-        "free-form entries are also resolved."
+        "Type any ticker — searches <b>NSE</b>, <b>NASDAQ</b>, <b>NYSE</b>, "
+        "<b>crypto</b>, <b>FX</b> live across Yahoo Finance + NSE + CoinGecko. "
+        "Free-form entries are resolved."
         "</div>",
         unsafe_allow_html=True,
     )
+
+    # ---- Recent searches (quick-jump pills) ----
+    recent = st.session_state.get("_recent_tickers", [])
+    if recent:
+        pill_cols = st.columns(min(len(recent) + 1, 7))
+        pill_cols[0].markdown(
+            "<div style='color:var(--text-muted);font-size:0.85rem;"
+            "padding-top:6px;'>Recent:</div>",
+            unsafe_allow_html=True,
+        )
+        for i, rec in enumerate(recent[:6]):
+            label = f"{rec['ticker']} · {rec['ac']}"
+            if pill_cols[i + 1].button(label, key=f"recent_pill_{i}",
+                                          width='stretch'):
+                # Pre-fill the selectbox by writing into session_state
+                st.session_state["predict_ticker_select"] = (
+                    f"{rec['ticker']:<14}  ·  "
+                    f"{ {'india':'NSE','us':'US','crypto':'CRYPTO','fx':'FX'}.get(rec['ac'],'?'):<6}  ·  "
+                    f"{rec.get('name', rec['ticker'])}"
+                )
+                st.rerun()
 
     # Initial suggestion list (popular names) — refreshed once query typed
     initial = _suggest_options("")
@@ -363,6 +398,12 @@ def _render_predict_tab() -> None:
         st.session_state["predict_last_card"] = card.to_dict() if card else None
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+        # Push to recent-searches list (LRU, max 6)
+        rec_list = st.session_state.get("_recent_tickers", [])
+        rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
+        rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,
+                              "name": res.display_name})
+        st.session_state["_recent_tickers"] = rec_list[:6]
     elif run_clicked:
         with st.spinner(f"Fetching live data for {res.ticker}…"):
             try:
@@ -383,6 +424,12 @@ def _render_predict_tab() -> None:
         st.session_state["predict_last_card"] = card.to_dict() if card else None
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+        # Push to recent-searches list (LRU, max 6)
+        rec_list = st.session_state.get("_recent_tickers", [])
+        rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
+        rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,
+                              "name": res.display_name})
+        st.session_state["_recent_tickers"] = rec_list[:6]
 
     # Render last card from session_state (survives reruns)
     cd = st.session_state.get("predict_last_card")

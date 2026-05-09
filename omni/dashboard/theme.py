@@ -348,12 +348,24 @@ section[data-testid="stSidebar"] {
     background: var(--accent) !important;
 }
 
-/* ---- tabs ---- */
+/* ---- tabs (sticky, animated) ---- */
 .stTabs [role="tablist"] {
     gap: var(--space-1);
-    background: transparent;
+    background: var(--surface-0);
     border-bottom: 1px solid var(--border-subtle);
-    padding-bottom: 0;
+    padding: 4px 4px 0 4px;
+    /* Stick to the top of the viewport when the user scrolls within a tab */
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+.stTabs [role="tablist"]::-webkit-scrollbar { height: 4px; }
+.stTabs [role="tablist"]::-webkit-scrollbar-thumb {
+    background: var(--border-subtle); border-radius: 2px;
 }
 .stTabs [role="tab"] {
     background: transparent !important;
@@ -364,14 +376,28 @@ section[data-testid="stSidebar"] {
     color: var(--text-muted) !important;
     font-weight: 500 !important;
     backdrop-filter: none;
-    transition: color 120ms ease, border-color 120ms ease;
+    white-space: nowrap;
+    transition: color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+                  border-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
+                  transform 120ms ease;
 }
-.stTabs [role="tab"]:hover { color: var(--text-primary) !important; }
+.stTabs [role="tab"]:hover {
+    color: var(--text-primary) !important;
+    transform: translateY(-1px);
+}
 .stTabs [role="tab"][aria-selected="true"] {
     color: var(--text-primary) !important;
     border-bottom: 2px solid var(--accent) !important;
     background: transparent !important;
     font-weight: 600 !important;
+}
+/* Smooth tab-panel fade-in */
+.stTabs [role="tabpanel"] {
+    animation: tabFadeIn 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes tabFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ---- expander ---- */
