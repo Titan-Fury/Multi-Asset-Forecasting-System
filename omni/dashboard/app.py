@@ -532,6 +532,19 @@ def _render_predict_tab() -> None:
     _u.prediction_card(cd)
     _u.provenance_strip(cd.get("provenance", {}))
 
+    # ---- Kelly position sizing (A5) ---------------------------------------
+    try:
+        from omni.ondemand.kelly import kelly_from_card
+        kr = kelly_from_card(cd)
+        k1, k2, k3 = st.columns([1, 1, 2])
+        k1.metric("Recommended size", f"{kr.fraction*100:.1f}% of capital",
+                  help="Half-Kelly, capped at 10%. 0% means no edge / FLAT.")
+        k2.metric("Kelly edge", f"{kr.edge:+.3f}",
+                  help="p*b - q. Positive = bet, ≤0 = skip.")
+        k3.caption(f"_{kr.side.upper()}_ · {kr.rationale}")
+    except Exception as _ke:
+        st.caption(f"_Kelly sizing unavailable: {_ke}_")
+
     # ---- Cutting-edge: TradingView Lightweight-Charts (Part C) ----
     try:
         from omni.dashboard.charts.lwchart import render_lwchart

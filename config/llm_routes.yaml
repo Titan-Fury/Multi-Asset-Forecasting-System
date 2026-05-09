@@ -122,6 +122,20 @@ backends:
     model: llama3.1-405b
     enabled: true
 
+  # ---- Embedding backends -------------------------------------------------
+  # NVIDIA Llama-Nemotron-Embed-VL 1B is FREE on OpenRouter.
+  # Use for S3 (news embeddings) and any future RAG-style retrieval.
+  # 1024-dim, multilingual, vision+language (we only use text here).
+  openrouter_nemotron_embed:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: nvidia/llama-nemotron-embed-vl-1b-v2:free
+    endpoint: /api/v1/embeddings
+    rate_limit:
+      rpm: 18
+      rpd: 200
+    enabled: true
+
 # Task -> backend chain. Primary tried first, fallback if primary errors / rate limits.
 tasks:
   sentiment_per_article:

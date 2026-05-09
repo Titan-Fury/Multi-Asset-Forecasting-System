@@ -59,3 +59,76 @@ def compute(prices: pd.DataFrame, *, horizons: tuple[int, ...] = (1, 5, 20),
             sign = np.sign(fwd)
         out[f"fwd_dir_{h}d"] = sign
     return out
+
+
+def triple_barrier(prices: pd.DataFrame,
+                   *,
+                   horizons: tuple[int, ...] = (1, 5, 20),
+                   pt_mult: float = 2.0,
+                   sl_mult: float = 1.0,
+                   vol_window: int = 20) -> pd.DataFrame:
+    """Triple-barrier labels (de Prado, AFML §3.4).
+
+    Instead of "did the price end up after H days", ask:
+      "within the next H days, did price touch +pt_mult*sigma BEFORE
+       touching -sl_mult*sigma, or did the time barrier expire first?"
+
+    sigma = rolling std of 1-day log returns over `vol_window`.
+
+    Output columns per horizon H:
+      tb_label_{H}d : +1 (PT hit), -1 (SL hit), 0 (time expired)
+      tb_first_{H}d : business days until the first barrier was touched
+
+    This is far more economically meaningful than fwd_dir because it
+    captures path-dependent risk — a +5% prediction that drew down 8%
+    along the way is NOT the same trade as a clean +5%.
+
+    Returns:
+        DataFrame keyed by `date` with the new columns. Existing
+        forward-return columns are not modified.
+    """
+    if prices is None or prices.empty:
+        return pd.DataFrame()
+    df = prices.sort_values("date").reset_index(drop=True)
+    out = pd.DataFrame({"date": df["date"]})
+    px = df["adj_close"].astype(float).to_numpy()
+    high = df.get("high", df["adj_close"]).astype(float).to_numpy()
+    low = df.get("low", df["adj_close"]).astype(float).to_numpy()
+    log_ret = np.log(px[1:] / px[:-1])
+    sigma = pd.Series(log_ret).rolling(vol_window, min_periods=5).std().to_numpy()
+    sigma = np.concatenate([[np.nan], sigma])  # align to px length
+    n = len(px)
+    for h in horizons:
+        labels = np.zeros(n, dtype=np.int8)
+        firsts = np.full(n, np.nan, dtype=float)
+        for i in range(n - 1):
+            s = sigma[i]
+            if not np.isfinite(s) or s <= 0:
+                continue
+            pt = px[i] * np.exp(pt_mult * s)     # upper barrier
+            sl = px[i] * np.exp(-sl_mult * s)    # lower barrier
+            j_end = min(i + h, n - 1)
+            label = 0
+            first = h
+            for j in range(i + 1, j_end + 1):
+                hit_pt = high[j] >= pt
+                hit_sl = low[j] <= sl
+                if hit_pt and hit_sl:
+                    # both touched same bar -> assume worst-case for safety
+                    label = -1
+                    first = j - i
+                    break
+                if hit_pt:
+                    label = 1
+                    first = j - i
+                    break
+                if hit_sl:
+                    label = -1
+                    first = j - i
+                    break
+            labels[i] = label
+            firsts[i] = first
+        out[f"tb_label_{h}d"] = labels
+        out[f"tb_first_{h}d"] = firsts
+    return out
+
