@@ -356,6 +356,48 @@ def lookup_ticker(ticker: str, asset_class: str,
         regime_out = None
         prov.add_warning(f"regime error: {e}")
 
+    # ---- Phase 20: microstructure inputs (India only) ----------------------
+    # Plumb bhavcopy / FII-DII / intraday / OI snapshot into the bundle so
+    # `omni.features.microstructure.compute_microstructure` actually has data.
+    # We stash them on `news_agg.attrs` because LookupBundle has fixed fields
+    # and `features_inline.py` already reads from `sentiment.attrs`.
+    if asset_class == "india":
+        try:
+            from omni.ingest.sources.nse_bhavcopy import fetch_range as _bhav_range
+            end = pd.Timestamp.now().normalize()
+            start = end - pd.tseries.offsets.BDay(60)
+            bhav = _bhav_range(start, end, tickers_nse=[ticker.replace(".NS", "").replace(".BO", "").upper()])
+            if not bhav.empty:
+                news_agg.attrs["bhavcopy"] = bhav
+                prov.add_warning(f"bhavcopy rows: {len(bhav)}") if len(bhav) < 5 else None
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"lookup: bhavcopy fetch failed: {e}")
+
+        try:
+            from omni.ingest.sources.nse_flows import fii_dii_activity
+            flows = fii_dii_activity()
+            if not flows.empty:
+                news_agg.attrs["fii_dii"] = flows
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"lookup: fii_dii fetch failed: {e}")
+
+        try:
+            from omni.ondemand import oi_archive  # see new module below
+            oi_hist = oi_archive.snapshot_and_history(ticker)
+            if not oi_hist.empty:
+                news_agg.attrs["oi_history"] = oi_hist
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"lookup: oi_history fetch failed: {e}")
+
+        # Intraday 5-min bars (best-effort; on-demand cache)
+        try:
+            from omni.ingest.intraday import fetch_intraday_bars
+            ib = fetch_intraday_bars(ticker, asset_class, interval="5m")
+            if ib is not None and not ib.empty:
+                news_agg.attrs["intraday"] = ib
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"lookup: intraday fetch failed: {e}")
+
     return LookupBundle(
         ticker=ticker, asset_class=asset_class, display_name=display_name,
         asof=asof, prices=prices, fundamentals=fund,

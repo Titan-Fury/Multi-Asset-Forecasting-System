@@ -293,6 +293,299 @@ def _render_movers_tab() -> None:
         st.dataframe(l_show, width='stretch', hide_index=True)
 
 
+def _render_portfolio_tab() -> None:
+    """Portfolio mode: combine Kelly fractions across watchlist + recent searches.
+
+    Filters to conviction >= threshold (slider, default 70), sums Kelly
+    fractions, applies a per-sector cap, displays as a sized table plus a
+    summary KPI row.
+    """
+    import pandas as pd
+    from omni.dashboard import watchlist as _wl
+    from omni.dashboard import searchhistory as _sh
+    from omni.ondemand.predict import predict_ticker
+    from omni.ondemand.kelly import kelly_from_card
+
+    st.markdown("### Portfolio mode")
+    st.caption(
+        "Kelly-sized recommendations across your watchlist and recent "
+        "searches. Total exposure is capped at 100 % of capital."
+    )
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+    conv_min = c1.slider("Min conviction", 0, 100, 70, step=5,
+                          help="Only names above this conviction enter the book.")
+    sector_cap = c2.slider("Per-sector cap (%)", 5, 100, 30, step=5,
+                            help="No single sector exceeds this fraction of capital.")
+    include_history = c3.checkbox("Include recent searches", value=True)
+
+    universe: list[tuple[str, str, str]] = []
+    seen = set()
+    for f in _wl.list_favorites():
+        key = (f["ticker"].upper(), f.get("asset_class", "india"))
+        if key in seen:
+            continue
+        seen.add(key)
+        universe.append((f["ticker"], f.get("asset_class", "india"),
+                          f.get("display_name", f["ticker"])))
+    if include_history:
+        for h in _sh.list_recent(20):
+            key = (h["ticker"].upper(), h.get("asset_class", "india"))
+            if key in seen:
+                continue
+            seen.add(key)
+            universe.append((h["ticker"], h.get("asset_class", "india"),
+                              h.get("display_name", h["ticker"])))
+
+    if not universe:
+        st.info(
+            "No tickers in watchlist or recent searches yet. "
+            "Star a few names from the Predict tab to build a portfolio."
+        )
+        return
+
+    rows: list[dict] = []
+    progress = st.progress(0.0, text="scoring portfolio …")
+    for i, (tk, ac, dn) in enumerate(universe):
+        try:
+            card = predict_ticker(tk, ac)
+            cd = card.to_dict()
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"{tk}: {e}")
+            progress.progress((i + 1) / len(universe))
+            continue
+        kr = kelly_from_card(cd)
+        rows.append({
+            "ticker": tk,
+            "name": dn,
+            "asset_class": ac,
+            "side": kr.side.upper(),
+            "conviction": round(cd.get("conviction", 0), 1),
+            "blended_p": round(cd.get("blended_p", 0.5), 3),
+            "regime": cd.get("regime", "?"),
+            "expected_high_pct": round(cd.get("expected_high_pct", 0), 2),
+            "expected_low_pct": round(cd.get("expected_low_pct", 0), 2),
+            "kelly_fraction": kr.fraction,
+            "kelly_edge": round(kr.edge, 3),
+        })
+        progress.progress((i + 1) / len(universe))
+    progress.empty()
+
+    if not rows:
+        st.warning("No predictions could be generated.")
+        return
+
+    pf = pd.DataFrame(rows)
+    in_book = pf[(pf["conviction"] >= conv_min) & (pf["kelly_fraction"] > 0)].copy()
+    if in_book.empty:
+        st.info(
+            f"None of {len(pf)} candidates pass the {conv_min}-conviction "
+            f"gate today. Lower the slider or wait for the next regime."
+        )
+        st.dataframe(pf.sort_values("conviction", ascending=False),
+                      width='stretch', hide_index=True)
+        return
+
+    # Per-sector cap (proxy: asset_class until we have a sector field)
+    in_book = in_book.sort_values("kelly_edge", ascending=False).reset_index(drop=True)
+    sector_running = {}
+    cap = sector_cap / 100.0
+    capped: list[float] = []
+    for _, r in in_book.iterrows():
+        sec = r["asset_class"]
+        used = sector_running.get(sec, 0.0)
+        room = max(0.0, cap - used)
+        f = min(float(r["kelly_fraction"]), room)
+        capped.append(f)
+        sector_running[sec] = used + f
+    in_book["allocated_fraction"] = capped
+
+    # Total-exposure cap (100 %)
+    tot = in_book["allocated_fraction"].sum()
+    if tot > 1.0:
+        in_book["allocated_fraction"] = in_book["allocated_fraction"] / tot
+
+    in_book["allocated_pct"] = (in_book["allocated_fraction"] * 100).round(2)
+    in_book = in_book.drop(columns=["kelly_fraction", "allocated_fraction"])
+
+    # KPI strip
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Names in book", f"{len(in_book)} / {len(pf)}")
+    k2.metric("Total exposure", f"{in_book['allocated_pct'].sum():.1f}%")
+    longs = (in_book["side"] == "LONG").sum()
+    shorts = (in_book["side"] == "SHORT").sum()
+    k3.metric("Long / Short", f"{longs} / {shorts}")
+    avg_edge = in_book["kelly_edge"].mean()
+    k4.metric("Avg Kelly edge", f"{avg_edge:+.3f}")
+
+    st.markdown("#### Recommended book")
+    st.dataframe(
+        in_book[["ticker", "name", "side", "conviction", "blended_p",
+                  "regime", "expected_high_pct", "expected_low_pct",
+                  "kelly_edge", "allocated_pct"]],
+        width='stretch', hide_index=True,
+    )
+
+    with st.expander("Below conviction gate (not in book)"):
+        rest = pf[~pf["ticker"].isin(in_book["ticker"])].sort_values(
+            "conviction", ascending=False)
+        if rest.empty:
+            st.caption("none")
+        else:
+            st.dataframe(rest, width='stretch', hide_index=True)
+
+
+def _render_replay_section() -> None:
+    """Drag a date slider over the logged-prediction window and see the
+    cards as they were emitted, with realised forward returns attached."""
+    import pandas as pd
+    from datetime import timedelta
+    try:
+        from omni.monitoring.replay import replay_window, replay_summary
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"_replay unavailable: {exc}_")
+        return
+
+    st.markdown("### Backtest replay")
+    st.caption(
+        "Logged-prediction archive joined to realised forward returns. "
+        "Use the slider to step through historical days."
+    )
+
+    today = pd.Timestamp.now().normalize()
+    earliest = (today - timedelta(days=180)).date()
+    latest = today.date()
+
+    rng = st.slider(
+        "Date range",
+        min_value=earliest, max_value=latest,
+        value=(earliest, latest), key="replay_range",
+    )
+    only_active = st.checkbox("Only direction != FLAT", value=True,
+                              key="replay_active")
+
+    rdf = replay_window(rng[0].isoformat(), rng[1].isoformat())
+    if rdf is None or rdf.empty:
+        st.info(
+            "No predictions logged in this window yet. The replay populates "
+            "as the daily orchestrator runs and `predict_ticker` calls log."
+        )
+        return
+
+    if only_active:
+        rdf = rdf[rdf["direction"] != 0]
+
+    summary = replay_summary(rdf)
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Predictions", summary.get("n_active", len(rdf)))
+    hr = summary.get("hit_rate")
+    k2.metric("Hit rate", f"{hr*100:.1f} %" if hr is not None else "—")
+    mr = summary.get("mean_realised_pct")
+    k3.metric("Mean realised", f"{mr:+.2f} %" if mr is not None else "—")
+
+    st.dataframe(
+        rdf[["asof", "ticker", "asset_class", "horizon_days",
+              "direction", "conviction", "proba_up", "expected_move_pct",
+              "regime", "realised_ret", "hit"]]
+        .sort_values("asof", ascending=False)
+        .head(300),
+        width='stretch', hide_index=True,
+    )
+
+
+def _render_earnings_tab() -> None:
+    """Earnings-day specials: who's reporting next 7 days + per-ticker history."""
+    import pandas as pd
+    from omni.dashboard import watchlist as _wl
+    from omni.dashboard import searchhistory as _sh
+    try:
+        from omni.ingest.earnings_calendar import (
+            next_earnings, earnings_history,
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"_earnings calendar unavailable: {exc}_")
+        return
+
+    st.markdown("### Earnings calendar")
+    st.caption(
+        "Next reporting dates and historical surprise % for tracked tickers."
+    )
+
+    # ---- Section A: who's reporting in the next 7 days
+    universe: list[tuple[str, str, str]] = []
+    seen = set()
+    for f in _wl.list_favorites():
+        key = f["ticker"].upper()
+        if key in seen:
+            continue
+        seen.add(key)
+        universe.append((f["ticker"], f.get("asset_class", "india"),
+                          f.get("display_name", f["ticker"])))
+    for h in _sh.list_recent(15):
+        key = h["ticker"].upper()
+        if key in seen:
+            continue
+        seen.add(key)
+        universe.append((h["ticker"], h.get("asset_class", "india"),
+                          h.get("display_name", h["ticker"])))
+
+    today = pd.Timestamp.now().normalize()
+    rows: list[dict] = []
+    for tk, ac, dn in universe:
+        try:
+            ed = next_earnings(tk, ac)
+        except Exception:
+            ed = None
+        if ed is None:
+            continue
+        days = (pd.Timestamp(ed).normalize() - today).days
+        if 0 <= days <= 7:
+            rows.append({
+                "ticker": tk,
+                "name": dn,
+                "asset_class": ac,
+                "earnings_date": pd.Timestamp(ed).date().isoformat(),
+                "days_until": days,
+            })
+    if rows:
+        st.markdown("#### Reporting next 7 days")
+        st.dataframe(pd.DataFrame(rows).sort_values("days_until"),
+                      width='stretch', hide_index=True)
+    else:
+        st.info("No tracked tickers reporting in the next 7 days.")
+
+    # ---- Section B: per-ticker drill-down
+    st.markdown("#### Per-ticker history")
+    default = universe[0][0] if universe else "INFY"
+    tk = st.text_input("Ticker (e.g. INFY, RELIANCE, AAPL)", value=default,
+                        key="earnings_drill")
+    ac = st.selectbox("Asset class", ["india", "us"], index=0,
+                       key="earnings_drill_ac")
+    if tk:
+        try:
+            ed = next_earnings(tk, ac)
+            hist = earnings_history(tk, ac)
+        except Exception as exc:  # noqa: BLE001
+            st.warning(f"could not load: {exc}")
+            return
+        if ed is not None:
+            days = (pd.Timestamp(ed).normalize() - today).days
+            st.caption(
+                f"Next earnings: **{pd.Timestamp(ed).date().isoformat()}** "
+                f"({'in ' + str(days) + ' days' if days >= 0 else str(-days) + ' days ago'})"
+            )
+        else:
+            st.caption("Next earnings date not available.")
+        if hist is None or hist.empty:
+            st.info("No historical earnings rows available.")
+        else:
+            st.dataframe(hist.head(8), width='stretch', hide_index=True)
+            if "surprise_pct" in hist.columns:
+                avg = hist["surprise_pct"].dropna().mean()
+                st.metric("Avg surprise (last 4 quarters)",
+                          f"{avg:+.2f} %" if pd.notna(avg) else "—")
+
+
 def _render_predict_tab() -> None:
     """On-demand single-ticker prediction tab.
 
@@ -662,8 +955,12 @@ def main() -> None:
     _u.kpi_row(summary)
 
     # ---- 3. tabs
-    tab_predict, tab_watch, tab_movers, tab_heat, tab_signals, tab_cosmos, tab_corr, tab_calib, tab_history = st.tabs([
-        "Predict", "★ Watchlist", "Top movers", "Watchlist heatmap", "Top signals", "Cosmos 3D", "Correlations", "Calibration", "History",
+    (tab_predict, tab_watch, tab_portfolio, tab_movers, tab_heat,
+     tab_signals, tab_cosmos, tab_corr, tab_calib, tab_earnings,
+     tab_history) = st.tabs([
+        "Predict", "★ Watchlist", "Portfolio", "Top movers",
+        "Watchlist heatmap", "Top signals", "Cosmos 3D", "Correlations",
+        "Calibration", "Earnings", "History",
     ])
 
     with tab_predict:
@@ -671,6 +968,9 @@ def main() -> None:
 
     with tab_watch:
         _render_watchlist_tab()
+
+    with tab_portfolio:
+        _render_portfolio_tab()
 
     with tab_movers:
         _render_movers_tab()
@@ -740,8 +1040,13 @@ def main() -> None:
     with tab_calib:
         _u.calibration_panel(preds)
 
+    with tab_earnings:
+        _render_earnings_tab()
+
     with tab_history:
         _u.signal_history_table(signals, max_rows=300)
+        st.divider()
+        _render_replay_section()
 
     st.markdown(
         "<div style='text-align:center;color:var(--text-muted);font-size:0.78rem;"

@@ -127,6 +127,22 @@ def main() -> int:
         return 0
     rdf = pd.DataFrame(rows)
 
+    # ---- Phase 20: ADWIN drift gate -----------------------------------------
+    # Per-horizon online drift detection. Flips needs_retrain.json when the
+    # rolling Brier-error stream shifts significantly.
+    try:
+        from omni.modeling.drift_gate import update_from_predictions
+        gate_input = rdf.rename(columns={
+            "proba_up": "prob_up",
+            "horizon_days": "horizon",
+        })
+        realised_dir = rdf["y_true"].map({1: 1, 0: -1})
+        gate_res = update_from_predictions(gate_input, realised_dir,
+                                            horizons=(1, 5, 21))
+        log.info(f"drift gate: {gate_res}")
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"drift_gate update failed: {exc}")
+
     overall = _metrics(rdf)
     by_horizon = (rdf.groupby("horizon_days")
                        .apply(_metrics, include_groups=False)
