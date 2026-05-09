@@ -135,11 +135,11 @@ def universe_heatmap(signals: pd.DataFrame) -> None:
             hovertemplate="<b>%{x}</b><br>%{y}<br>score: %{z:.0f}<extra></extra>",
         ))
         fig.update_layout(**_plotly_layout(height=260))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     except ImportError:
         styled = pivot.style.background_gradient(cmap="RdYlGn", vmin=-100, vmax=100) \
             .format("{:.0f}", na_rep="—")
-        st.dataframe(styled, use_container_width=True)
+        st.dataframe(styled, width='stretch')
 
 
 # ---------- signal card ----------
@@ -207,7 +207,7 @@ def signal_card(row: pd.Series) -> None:
                                          gridcolor="rgba(148,163,184,0.15)",
                                          zeroline=False),
                               xaxis=dict(zeroline=False)))
-            st.plotly_chart(fig, use_container_width=True,
+            st.plotly_chart(fig, width='stretch',
                             config={"displayModeBar": False})
         except ImportError:
             st.bar_chart(pdf, x="pillar", y="score", height=160)
@@ -248,7 +248,7 @@ def calibration_panel(preds: pd.DataFrame) -> None:
                         yaxis=dict(title="empirical hit rate", range=[0, 1],
                                    gridcolor="rgba(148,163,184,0.15)"),
                     ))
-                    st.plotly_chart(fig, use_container_width=True,
+                    st.plotly_chart(fig, width='stretch',
                                     config={"displayModeBar": False})
                 except ImportError:
                     tab["perfect"] = tab["bin_mean_p"]
@@ -277,7 +277,7 @@ def calibration_panel(preds: pd.DataFrame) -> None:
                                    gridcolor="rgba(148,163,184,0.15)",
                                    tickformat=".1%"),
                     ))
-                    st.plotly_chart(fig, use_container_width=True,
+                    st.plotly_chart(fig, width='stretch',
                                     config={"displayModeBar": False})
                 except ImportError:
                     st.bar_chart(lift.set_index("decile")[["mean_fwd_ret"]], height=240)
@@ -305,7 +305,7 @@ def signal_history_table(signals: pd.DataFrame, *, max_rows: int = 200) -> None:
         column_config["fwd_ret_5d"] = st.column_config.NumberColumn(
             "fwd 5d", format="%.2f%%")
 
-    st.dataframe(show, use_container_width=True, hide_index=True,
+    st.dataframe(show, width='stretch', hide_index=True,
                  column_config=column_config)
 
 
@@ -1004,7 +1004,7 @@ def prediction_card(card_dict: dict) -> None:
                                          gridcolor="rgba(148,163,184,0.15)",
                                          zeroline=False),
                               xaxis=dict(zeroline=False)))
-            st.plotly_chart(fig, use_container_width=True,
+            st.plotly_chart(fig, width='stretch',
                             config={"displayModeBar": False})
         except ImportError:
             st.bar_chart(pdf, x="pillar", y="score", height=180)

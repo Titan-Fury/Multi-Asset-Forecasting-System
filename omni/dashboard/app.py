@@ -123,9 +123,9 @@ def _render_watchlist_tab() -> None:
 
     cols = st.columns([3, 1, 1])
     cols[0].markdown(f"**{len(favs)} ticker{'s' if len(favs) != 1 else ''} on your watchlist**")
-    if cols[1].button("Refresh all", use_container_width=True, key="wl_refresh"):
+    if cols[1].button("Refresh all", width='stretch', key="wl_refresh"):
         st.session_state["_wl_refresh_nonce"] = st.session_state.get("_wl_refresh_nonce", 0) + 1
-    if cols[2].button("Clear all", use_container_width=True, key="wl_clear"):
+    if cols[2].button("Clear all", width='stretch', key="wl_clear"):
         n = _wl.clear_all()
         st.warning(f"Removed {n} ticker(s).")
         st.rerun()
@@ -175,7 +175,7 @@ def _render_watchlist_tab() -> None:
 
     import pandas as pd
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width='stretch', hide_index=True)
 
     # Per-ticker remove buttons
     st.markdown("##### Manage")
@@ -183,7 +183,7 @@ def _render_watchlist_tab() -> None:
     for i, fav in enumerate(favs):
         with rcols[i % len(rcols)]:
             if st.button(f"× {fav['ticker']}", key=f"wl_rm_{fav['ticker']}",
-                          use_container_width=True):
+                          width='stretch'):
                 _wl.remove_favorite(fav["ticker"])
                 st.rerun()
 
@@ -232,10 +232,10 @@ def _render_movers_tab() -> None:
     cg, cl = st.columns(2)
     with cg:
         st.markdown(f"### Top {len(gainers)} gainers")
-        st.dataframe(g_show, use_container_width=True, hide_index=True)
+        st.dataframe(g_show, width='stretch', hide_index=True)
     with cl:
         st.markdown(f"### Top {len(losers)} losers")
-        st.dataframe(l_show, use_container_width=True, hide_index=True)
+        st.dataframe(l_show, width='stretch', hide_index=True)
 
 
 def _render_predict_tab() -> None:
@@ -262,7 +262,7 @@ def _render_predict_tab() -> None:
     # Initial suggestion list (popular names) — refreshed once query typed
     initial = _suggest_options("")
 
-    col_q, col_run, col_deep = st.columns([6, 2, 2])
+    col_q, col_run, col_deep, col_refresh = st.columns([5, 2, 2, 2])
     with col_q:
         try:
             choice = st.selectbox(
@@ -282,10 +282,19 @@ def _render_predict_tab() -> None:
             )
     with col_run:
         st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
-        run_clicked = st.button("Run prediction", use_container_width=True, type="primary")
+        run_clicked = st.button("Run prediction", width='stretch', type="primary")
     with col_deep:
         st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
-        deep_clicked = st.button("Deep analysis (~15s)", use_container_width=True)
+        deep_clicked = st.button("Deep analysis (~15s)", width='stretch')
+    with col_refresh:
+        st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
+        refresh_clicked = st.button(
+            "🔄 Force refresh", width='stretch',
+            help="Drop the cached prediction + prices + news for this "
+                  "ticker and re-fetch live. Use when you want intraday-fresh "
+                  "data (default cache is 30 min for predictions, 30 min for "
+                  "news, 4 h for prices).",
+        )
 
     raw = _parse_label(choice) if choice else ""
     if not raw:
@@ -320,7 +329,7 @@ def _render_predict_tab() -> None:
     is_fav = _wl.is_favorite(res.ticker)
     fav_label = "★ Remove from watchlist" if is_fav else "☆ Add to watchlist"
     if fav_col1.button(fav_label, key=f"fav_btn_{res.ticker}",
-                         use_container_width=True):
+                         width='stretch'):
         if is_fav:
             _wl.remove_favorite(res.ticker)
             fav_col2.success(f"Removed **{res.ticker}** from watchlist.")
@@ -331,6 +340,19 @@ def _render_predict_tab() -> None:
 
     # Action dispatch — deep takes priority if both clicked
     card = None
+    # Force-refresh: drop every cache entry referencing this ticker so the
+    # next predict_ticker call rebuilds prices, news, fundamentals and the
+    # prediction card from live APIs. The 30-min default TTL still applies
+    # afterwards.
+    if refresh_clicked:
+        from omni.ondemand.cache import purge_ticker
+        n = purge_ticker(res.ticker)
+        st.session_state["predict_last_card"] = None
+        st.toast(f"Cleared {n} cache entries for {res.ticker} - rebuilding...",
+                  icon="🔄")
+        # Treat refresh as an implicit Run
+        run_clicked = True
+
     if deep_clicked:
         with st.spinner(f"Fitting walk-forward model for {res.ticker}…"):
             try:
@@ -339,6 +361,8 @@ def _render_predict_tab() -> None:
                 st.error(f"Deep analysis failed: {exc}")
                 return
         st.session_state["predict_last_card"] = card.to_dict() if card else None
+        st.session_state[f"_predict_generated_at_{res.ticker}"] = (
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
     elif run_clicked:
         with st.spinner(f"Fetching live data for {res.ticker}…"):
             try:
@@ -357,6 +381,8 @@ def _render_predict_tab() -> None:
             )
             return
         st.session_state["predict_last_card"] = card.to_dict() if card else None
+        st.session_state[f"_predict_generated_at_{res.ticker}"] = (
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
 
     # Render last card from session_state (survives reruns)
     cd = st.session_state.get("predict_last_card")
@@ -366,6 +392,22 @@ def _render_predict_tab() -> None:
     if cd.get("ticker") and cd["ticker"].upper() != res.ticker.upper():
         st.caption(
             f"Showing cached card for **{cd['ticker']}**. Click Run to refresh for {res.ticker}."
+        )
+
+    # As-of indicator: the prediction card's `asof` is the trading day of the
+    # last data point; we also show the wall-clock time it was generated so
+    # the user knows whether to hit Force refresh.
+    asof_str = cd.get("asof", "")
+    generated_at = st.session_state.get(f"_predict_generated_at_{res.ticker}", "")
+    if asof_str or generated_at:
+        bits = []
+        if asof_str:
+            bits.append(f"data as-of **{str(asof_str)[:10]}**")
+        if generated_at:
+            bits.append(f"generated **{generated_at}**")
+        st.caption(
+            "  ·  ".join(bits) +
+            "  ·  cache TTL 30 min  ·  click 🔄 Force refresh for live data"
         )
 
     _u.prediction_card(cd)
@@ -414,7 +456,7 @@ def main() -> None:
         _theme_override(theme_choice)
 
         st.markdown("**Filters**")
-        if st.button("⟳ Reload artifacts", use_container_width=True):
+        if st.button("⟳ Reload artifacts", width='stretch'):
             _c.load_predictions.clear()
             _c.load_signals.clear()
             _c.load_regime.clear()

@@ -41,7 +41,11 @@ class _TTL:
     news: int = 30 * 60
     macro: int = 24 * 3600
     regime: int = 24 * 3600
-    deep_analysis: int = 24 * 3600
+    # Prediction cards expire fast - news is the most volatile input
+    # (30min TTL matches the news cache). Without this, an old cached
+    # prediction can mask intraday price + sentiment moves for a full
+    # day and the dashboard looks frozen.
+    deep_analysis: int = 30 * 60
 
 
 TTL = _TTL()
@@ -105,6 +109,33 @@ def invalidate(prefix: str) -> int:
     n = 0
     for k in list(cache):
         if isinstance(k, str) and k.startswith(prefix):
+            try:
+                del cache[k]
+                n += 1
+            except KeyError:
+                pass
+    return n
+
+
+def purge_ticker(ticker: str) -> int:
+    """Drop every cache entry that mentions a ticker. Used by the
+    'Force refresh' button on the Predict tab so the next call rebuilds
+    everything (prices + news + fundamentals + prediction card) from
+    live APIs instead of returning the stale cached prediction.
+    """
+    if not ticker:
+        return 0
+    needle = f":{ticker.upper()}"
+    needle_lower = f":{ticker.lower()}"
+    cache = get_cache()
+    n = 0
+    for k in list(cache):
+        if not isinstance(k, str):
+            continue
+        # Match either ":TICKER" segment (most keys) or ":TICKER:" mid-key
+        if (needle in k or needle_lower in k
+                or k.endswith(f":{ticker.upper()}")
+                or k.endswith(f":{ticker.lower()}")):
             try:
                 del cache[k]
                 n += 1
