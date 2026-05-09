@@ -144,6 +144,36 @@ def build_features_inline(
     except Exception as exc:  # noqa: BLE001
         from omni.utils.logger import log
         log.warning(f"earnings features failed: {exc}")
+
+    # ---- S1-lite microstructure (Phase 19) ---------------------------------
+    # Free-feed proxy for VPIN/OFI/Kyle's lambda. India equities only;
+    # non-India returns NaN columns to keep the schema stable.
+    try:
+        from omni.features.microstructure import compute_microstructure
+        bhav = sentiment.attrs.get("bhavcopy") if sentiment is not None else None
+        out = compute_microstructure(
+            out, asset_class, ticker, prices,
+            bhavcopy_df=bhav,
+            flows_df=getattr(sentiment, "attrs", {}).get("fii_dii") if sentiment is not None else None,
+            intraday_bars=getattr(sentiment, "attrs", {}).get("intraday") if sentiment is not None else None,
+            oi_history=getattr(sentiment, "attrs", {}).get("oi_history") if sentiment is not None else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        from omni.utils.logger import log
+        log.warning(f"microstructure features failed: {exc}")
+
+    # ---- S3 news embeddings (Phase 19) -------------------------------------
+    # Adds emb_00..emb_31 (PCA-reduced Nvidia Nemotron embeddings).
+    # Lagged +1 BDay; opt-in via OMNI_DISABLE_EMB=1 to skip for benchmarking.
+    import os as _os
+    if _os.environ.get("OMNI_DISABLE_EMB", "0") != "1":
+        try:
+            from omni.features.news_embeddings import add_news_embeddings
+            news_raw = getattr(sentiment, "attrs", {}).get("news_raw") if sentiment is not None else None
+            out = add_news_embeddings(out, ticker, news_raw=news_raw)
+        except Exception as exc:  # noqa: BLE001
+            from omni.utils.logger import log
+            log.warning(f"news embeddings failed: {exc}")
     # NB: regime_interactions runs in build_features_full when 'regime' present;
     # for the inline (live) path the rubric scorer reads regime separately so
     # interactions aren't strictly needed for the live row.
