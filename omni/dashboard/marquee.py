@@ -47,6 +47,12 @@ class MarqueeItem:
         return f'<span>{self.label}</span><b class="{cls}">{self.value}</b>'
 
 
+# Last-known-good fallback so the marquee NEVER goes blank, even if yfinance
+# is offline or rate-limited. Updated whenever a live fetch succeeds.
+_FALLBACK: list["MarqueeItem"] = []
+_LAST_GOOD: list["MarqueeItem"] = []
+
+
 def _safe_quote(symbol: str) -> tuple[float, float] | None:
     """Return (last, prev_close). None on any failure."""
     try:
@@ -99,9 +105,11 @@ def _fmt_abs(last: float, prev: float) -> tuple[str, int]:
 def fetch_marquee_data() -> list[MarqueeItem]:
     """Fetch live quotes for the marquee. Cached 5 min; 13 symbols ≈ 1-2s."""
     out: list[MarqueeItem] = []
+    failed = 0
     for sym, label, fmt in _TICKERS:
         q = _safe_quote(sym)
         if q is None:
+            failed += 1
             out.append(MarqueeItem(label=label, value="—", direction=0))
             continue
         last, prev = q
@@ -110,7 +118,30 @@ def fetch_marquee_data() -> list[MarqueeItem]:
         else:
             v, d = _fmt_abs(last, prev)
         out.append(MarqueeItem(label=label, value=v, direction=d))
+
+    # If MORE THAN HALF failed, prefer last-known-good if we have it.
+    global _LAST_GOOD
+    if failed > len(_TICKERS) // 2:
+        if _LAST_GOOD:
+            return _LAST_GOOD
+        # else: return whatever we got (mostly em-dashes is still visible)
+    else:
+        _LAST_GOOD = out  # remember good fetch
     return out
+
+
+def _demo_items() -> list[MarqueeItem]:
+    """Visible-but-clearly-static fallback if yfinance is completely unavailable."""
+    return [
+        MarqueeItem("NIFTY 50",   "demo", 0),
+        MarqueeItem("SENSEX",     "demo", 0),
+        MarqueeItem("BANKNIFTY",  "demo", 0),
+        MarqueeItem("S&P 500",    "demo", 0),
+        MarqueeItem("NASDAQ",     "demo", 0),
+        MarqueeItem("BTC",        "demo", 0),
+        MarqueeItem("GOLD",       "demo", 0),
+        MarqueeItem("USDINR",     "demo", 0),
+    ]
 
 
 def marquee_html(items: Iterable[MarqueeItem] | None = None,
@@ -123,11 +154,9 @@ def marquee_html(items: Iterable[MarqueeItem] | None = None,
             items = []
     items = list(items)
     if not items:
-        return ""
+        items = _demo_items()       # never go fully blank
     # Duplicate the list so the seamless animation loop has zero gap.
     track = "".join(it.html() for it in items) * 2
-    # The CSS in theme.py already styles .ultra-marquee. We just need to
-    # override the height inline if requested.
     style = f'style="height: {height_px}px;"' if height_px != 28 else ""
     track_style = f'style="height: {height_px}px; padding: {(height_px - 16) // 2}px 0;"' if height_px != 28 else ""
     return (
