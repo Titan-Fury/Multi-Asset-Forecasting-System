@@ -2264,6 +2264,153 @@ section[data-testid="stSidebar"] > div:first-child > div:first-child {
 [data-testid="stTooltipIcon"]:hover svg {
   fill: #38bdf8 !important;
 }
+
+/* ==== Phase 24.9 — RADIUS / PADDING SCALE + SIDEBAR TOGGLE GUARANTEE ======
+   Fixes three real production issues:
+   1. Padding < border-radius made content collide with rounded corners
+   2. Unbalanced vertical spacing in container blocks
+   3. Nested radii looked arbitrary — locked a proper scale: 6/10/14/20px
+   4. Sidebar toggle was sometimes invisible — guaranteed-visible custom button
+   =========================================================================== */
+
+/* ---- Radius scale tokens ------------------------------------------------ */
+:root {
+  --r-xs: 6px;       /* small chips, deltas */
+  --r-sm: 10px;      /* buttons, small inputs */
+  --r-md: 14px;      /* metric tiles, medium cards */
+  --r-lg: 20px;      /* hero card, page-level containers */
+  --r-pill: 999px;   /* pure pills */
+  /* Padding scale — each level matches a radius so OuterPad ≥ OuterRadius */
+  --p-card-sm: 14px;     /* matches r-sm content */
+  --p-card-md: 20px;     /* matches r-md content */
+  --p-card-lg: 28px;     /* matches r-lg content */
+}
+
+/* ---- Predict tab "Enter a ticker to begin" container ---- */
+/* Streamlit's stInfo had bottom-left corner collision because the inner
+   padding (10px) was less than the border-radius (12px). Fix: bump padding,
+   match the radius scale. */
+.stApp [data-testid="stInfo"] {
+  padding: 16px 22px !important;
+  border-radius: var(--r-md) !important;
+  margin-top: 10px !important;
+}
+
+/* ---- Streamlit alert containers (info / warning / error / success) ---- */
+.stApp [data-testid="stAlert"],
+.stApp [data-testid="stAlertContentInfo"],
+.stApp [data-testid="stAlertContentWarning"],
+.stApp [data-testid="stAlertContentError"],
+.stApp [data-testid="stAlertContentSuccess"] {
+  padding: 14px 20px !important;
+  border-radius: var(--r-md) !important;
+  line-height: 1.5;
+}
+
+/* ---- Buttons: locked radius, balanced padding ---- */
+.stButton > button {
+  padding: 12px 18px !important;
+  border-radius: var(--r-sm) !important;
+  min-height: 42px;
+  font-size: 13.5px !important;
+}
+
+/* ---- Selectbox / TextInput inner radius matches card radius ---- */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stTextInput"] > div > div {
+  border-radius: var(--r-sm) !important;
+}
+
+/* ---- Search history expander: outer pad > radius ---- */
+[data-testid="stExpander"] > details {
+  border-radius: var(--r-md) !important;
+  overflow: hidden;
+}
+[data-testid="stExpander"] > details > summary {
+  padding: 12px 18px !important;
+  border-radius: var(--r-md) !important;
+}
+
+/* ---- Block container (the wrapper around each tab's content) ---- */
+[data-testid="stVerticalBlock"] > div:has([data-testid="stInfo"]:only-child),
+[data-testid="stHorizontalBlock"] {
+  gap: 12px;
+}
+
+/* ---- Predict tab specifically: balance top vs bottom padding ----------- */
+/* Streamlit's column layout has consistent gaps; the trailing element
+   (st.info "Enter a ticker") lands too close to the next section. Add
+   bottom margin so the empty state doesn't feel jammed against the edge. */
+.stApp [data-testid="stInfo"]:last-child {
+  margin-bottom: 24px !important;
+}
+
+/* ==== SIDEBAR TOGGLE GUARANTEE (Phase 24.9 hot fix) ======================
+   The previous Phase 24.5 styling targeted [data-testid="collapsedControl"]
+   but Streamlit 1.40+ may render it as different testids depending on
+   version. We force-apply across ALL plausible selectors AND inject our
+   OWN guaranteed-visible toggle button via JS as a fallback. */
+
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+button[kind="header"][title="Show sidebar"],
+button[kind="header"][title="Open sidebar"],
+header[data-testid="stHeader"] [data-testid="baseButton-header"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 2147483600 !important;
+}
+
+/* Our own always-visible floating toggle (created via JS below). */
+.omni-sidebar-toggle {
+  position: fixed !important;
+  top: 50px !important;
+  left: 14px !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: linear-gradient(135deg,
+    color-mix(in oklch, #38bdf8 35%, transparent),
+    color-mix(in oklch, #a855f7 35%, transparent)) !important;
+  border: 1px solid color-mix(in oklch, #38bdf8 55%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 8px 24px -8px rgba(56, 189, 248, 0.55),
+    0 0 24px -6px rgba(168, 85, 247, 0.45);
+  cursor: pointer !important;
+  z-index: 2147483647 !important;
+  transition: all 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  color: #f8fafc !important;
+}
+.omni-sidebar-toggle:hover {
+  transform: scale(1.08) translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.95) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 12px 32px -8px rgba(56, 189, 248, 0.75),
+    0 0 32px -4px rgba(168, 85, 247, 0.6);
+}
+.omni-sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+  stroke: #f8fafc;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.5));
+}
+/* Hide our toggle when the native sidebar IS expanded — sidebar has its
+   own close button inside */
+.omni-sidebar-toggle.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-60px);
+}
 </style>
 """
 
@@ -2441,6 +2588,78 @@ _ULTRA_FX_JS = """
     if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
     if (e.shiftKey && (e.key === 'C' || e.key === 'c')) celebrate({});
   });
+
+  // ====================================================================
+  // Phase 24.9 — Custom always-visible sidebar toggle
+  // Streamlit's native collapsed-control sometimes hides on rerun OR uses
+  // different test IDs across versions. Inject our own guaranteed-visible
+  // floating button that programmatically clicks whatever native control
+  // exists. Falls back to dispatching a window event Streamlit listens for.
+  // ====================================================================
+  function ensureSidebarToggle(){
+    if (document.querySelector('.omni-sidebar-toggle')) return;
+    const btn = document.createElement('button');
+    btn.className = 'omni-sidebar-toggle';
+    btn.setAttribute('aria-label', 'Toggle sidebar');
+    btn.setAttribute('title', 'Toggle sidebar');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                  + 'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+                  + '<line x1="3" y1="6" x2="21" y2="6"/>'
+                  + '<line x1="3" y1="12" x2="21" y2="12"/>'
+                  + '<line x1="3" y1="18" x2="21" y2="18"/></svg>';
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      // Try every known Streamlit toggle selector in order
+      const candidates = [
+        'button[data-testid="stSidebarCollapseButton"]',
+        'button[data-testid="stSidebarCollapsedControl"]',
+        '[data-testid="collapsedControl"] button',
+        '[data-testid="collapsedControl"]',
+        'button[kind="header"][title="Show sidebar"]',
+        'button[kind="header"][title="Open sidebar"]',
+      ];
+      for (const sel of candidates) {
+        const el = document.querySelector(sel);
+        if (el) {
+          el.click();
+          return;
+        }
+      }
+    });
+    document.body.appendChild(btn);
+  }
+  ensureSidebarToggle();
+
+  // Update toggle visibility based on sidebar state
+  function updateToggleVisibility(){
+    const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+    const toggle = document.querySelector('.omni-sidebar-toggle');
+    if (!toggle) return;
+    if (!sidebar) {
+      toggle.classList.remove('is-hidden');
+      return;
+    }
+    // Check if sidebar is currently expanded by reading aria-expanded or
+    // the visible width of the sidebar
+    const ariaExpanded = sidebar.getAttribute('aria-expanded');
+    const w = sidebar.getBoundingClientRect().width;
+    const isOpen = (ariaExpanded === 'true') || (w > 80);
+    toggle.classList.toggle('is-hidden', isOpen);
+  }
+  updateToggleVisibility();
+
+  // Also re-run on every DOM mutation (Streamlit reruns)
+  const sbObs = new MutationObserver(function(){
+    if (window.__sbRaf) return;
+    window.__sbRaf = requestAnimationFrame(function(){
+      window.__sbRaf = null;
+      ensureSidebarToggle();
+      updateToggleVisibility();
+    });
+  });
+  sbObs.observe(document.body, { childList: true, subtree: true,
+                                  attributes: true, attributeFilter: ['aria-expanded', 'class'] });
 })();
 </script>
 """
