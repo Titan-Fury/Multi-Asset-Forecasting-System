@@ -139,6 +139,41 @@ def regime_banner(regime_df: pd.DataFrame) -> None:
     )
 
 
+# ---------- sparkline helper (UI8) ----------
+
+def sparkline_svg(values: list[float] | "pd.Series", *, width: int = 80,
+                  height: int = 18) -> str:
+    """Inline SVG polyline of a time series. Returns HTML string.
+
+    Direction (cyan up / red down) is inferred from the first vs last value.
+    Safe against empty / NaN-only inputs.
+    """
+    try:
+        if hasattr(values, "tolist"):
+            vs = [v for v in values.tolist() if v is not None]
+        else:
+            vs = [v for v in (values or []) if v is not None]
+        vs = [float(v) for v in vs if v == v]  # drop NaN
+    except Exception:
+        return ""
+    if len(vs) < 2:
+        return ""
+    lo, hi = min(vs), max(vs)
+    rng = hi - lo if hi > lo else 1.0
+    n = len(vs)
+    pts = []
+    for i, v in enumerate(vs):
+        x = (i / (n - 1)) * (width - 2) + 1
+        y = height - 1 - ((v - lo) / rng) * (height - 2)
+        pts.append(f"{x:.1f},{y:.1f}")
+    cls = "up" if vs[-1] >= vs[0] else "down"
+    return (
+        f"<svg class='sparkline {cls}' viewBox='0 0 {width} {height}' "
+        f"xmlns='http://www.w3.org/2000/svg'>"
+        f"<polyline points='{' '.join(pts)}' /></svg>"
+    )
+
+
 # ---------- KPI row ----------
 
 def kpi_row(summary: dict) -> None:

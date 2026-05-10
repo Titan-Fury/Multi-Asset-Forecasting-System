@@ -188,8 +188,27 @@ def _build_card(
     sigma_5d_pct = sigma_d * (5 ** 0.5) * 100.0  # 5-trading-day horizon, in percent
     edge = (float(row.get("blended_p", 0.5)) - 0.5) * 2.0  # in [-1, 1]
     expected_move_pct = float(edge * sigma_5d_pct)
-    expected_low_pct = float(expected_move_pct - sigma_5d_pct)
-    expected_high_pct = float(expected_move_pct + sigma_5d_pct)
+
+    # Conformal prediction interval (Phase 22 / M4): if a calibrator was
+    # persisted alongside the universal model, use its 80% coverage band.
+    # Otherwise fall back to the heuristic ±1σ envelope.
+    _conformal_used = False
+    try:
+        from omni.models.conformal import ConformalIntervalCalibrator
+        from pathlib import Path as _P
+        import joblib as _jl
+        _cal_path = _P("data") / "models" / "conformal_h5.joblib"
+        if _cal_path.exists():
+            _cal: ConformalIntervalCalibrator = _jl.load(_cal_path)
+            _lo, _hi = _cal.widen(expected_move_pct, sigma_5d_pct)
+            expected_low_pct = float(_lo)
+            expected_high_pct = float(_hi)
+            _conformal_used = True
+    except Exception:  # noqa: BLE001
+        pass
+    if not _conformal_used:
+        expected_low_pct = float(expected_move_pct - sigma_5d_pct)
+        expected_high_pct = float(expected_move_pct + sigma_5d_pct)
 
     # Per-horizon expected moves. Drift scales LINEARLY with time (h/5),
     # vol scales as SQRT(h/5). The model is calibrated on 5d direction;
@@ -523,7 +542,31 @@ def deep_analysis(ticker: str, asset_class: str,
     live = full.tail(1)[feat_cols].apply(pd.to_numeric, errors="coerce")
     medians = feats[feat_cols].apply(pd.to_numeric, errors="coerce").median()
     live = live.fillna(medians).fillna(0.0)
-    proba = float(last_fold.calibrator.predict_proba(live.to_numpy(dtype=float))[0, 1])
+    proba_deep = float(last_fold.calibrator.predict_proba(live.to_numpy(dtype=float))[0, 1])
+
+    # ---- M2 (Phase 22): Bayesian shrinkage toward universal ----------------
+    # Small training set -> mostly universal; long history -> mostly deep.
+    # Weight w = sqrt(n_deep / (n_deep + 252))  (252 = 1y prior strength).
+    proba_universal = None
+    shrink_w = 1.0
+    try:
+        um = model_registry.load()
+        feat_only = full.tail(1)
+        for c in [c for c in feat_only.columns
+                    if c.startswith(("fwd_ret_", "fwd_dir_", "fwd_q_"))]:
+            feat_only[c] = np.nan
+        X_one = _align_to_universal(feat_only, um)
+        proba_universal = float(um.calibrator.predict_proba(X_one)[0, 1])
+        n_deep = int(len(feats))
+        shrink_w = float(np.sqrt(n_deep / (n_deep + 252.0)))
+        proba = shrink_w * proba_deep + (1.0 - shrink_w) * proba_universal
+        log.info(
+            f"deep_analysis shrinkage: deep={proba_deep:.3f} "
+            f"univ={proba_universal:.3f} w={shrink_w:.2f} -> {proba:.3f}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"deep shrinkage skipped: {exc}")
+        proba = proba_deep
 
     # Per-fold AUC
     from sklearn.metrics import roc_auc_score

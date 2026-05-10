@@ -325,6 +325,7 @@ def _build_tracked_universe(*, include_history: bool = True,
 def _record_and_update_lru(res: Resolution, card) -> None:
     """Persist the search to history.json + update the in-session LRU pills.
     Idempotent — safe to call after every successful prediction.
+    Also fires a Streamlit toast (UI7) for live feedback.
     """
     from omni.dashboard import searchhistory as _sh
 
@@ -338,6 +339,14 @@ def _record_and_update_lru(res: Resolution, card) -> None:
             conviction=d.get("conviction"),
             regime=d.get("regime"),
         )
+        # UI7 — toast notification (Streamlit ≥ 1.26)
+        try:
+            dir_label = {1: "LONG", -1: "SHORT", 0: "FLAT"}.get(int(d.get("direction", 0)), "FLAT")
+            conv = float(d.get("conviction", 0))
+            icon = "🟢" if conv >= 70 else ("🟡" if conv >= 40 else "⚪")
+            st.toast(f"{res.ticker}: {dir_label} · conviction {conv:.0f}/100", icon=icon)
+        except Exception:
+            pass
     rec_list = st.session_state.get("_recent_tickers", [])
     rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
     rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,

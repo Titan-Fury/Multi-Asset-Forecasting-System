@@ -638,7 +638,247 @@ footer { visibility: hidden; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* =====================================================================
+   Phase 22 — Cutting-edge CSS upgrades (UI1, UI2, UI3, UI5)
+   All progressively-enhance: older browsers ignore unknown properties.
+   ===================================================================== */
+
+/* UI1 — @property registered custom property for animated gradients */
+@property --glow-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+@keyframes _glow-rotate { to { --glow-angle: 360deg; } }
+.prediction-card, .signal-card {
+    position: relative;
+    isolation: isolate;
+}
+.prediction-card::before, .signal-card::before {
+    content: "";
+    position: absolute; inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+        from var(--glow-angle, 0deg),
+        transparent 0deg,
+        color-mix(in oklch, var(--accent) 60%, transparent) 90deg,
+        transparent 180deg,
+        color-mix(in oklch, #8b5cf6 60%, transparent) 270deg,
+        transparent 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: _glow-rotate 12s linear infinite;
+    pointer-events: none;
+    opacity: 0.6;
+    z-index: -1;
+}
+
+/* UI2 — color-mix() utilities (replaces hardcoded rgba shades) */
+.accent-tint-soft  { background: color-mix(in oklch, var(--accent) 8%,  transparent); }
+.accent-tint-mid   { background: color-mix(in oklch, var(--accent) 16%, transparent); }
+.accent-tint-strong{ background: color-mix(in oklch, var(--accent) 28%, transparent); }
+.violet-tint-soft  { background: color-mix(in oklch, #8b5cf6 8%, transparent); }
+
+/* UI3 — Container queries on the prediction card */
+.prediction-card { container-type: inline-size; container-name: predcard; }
+@container predcard (max-width: 640px) {
+    .prediction-card .stats { grid-template-columns: 1fr 1fr !important; }
+    .prediction-card h2 { font-size: 1.25rem !important; }
+}
+@container predcard (min-width: 900px) {
+    .prediction-card .stats { grid-template-columns: repeat(4, 1fr) !important; }
+}
+
+/* UI5 — Scroll-driven hero parallax + KPI fade-in (Chrome 115+, falls back to no-op) */
+@supports (animation-timeline: scroll()) {
+    .hero {
+        animation: _hero-shrink linear both;
+        animation-timeline: scroll(root);
+        animation-range: 0 240px;
+    }
+    @keyframes _hero-shrink {
+        to {
+            transform: scale(0.94) translateY(-6px);
+            opacity: 0.62;
+            filter: blur(1px);
+        }
+    }
+    [data-testid="stMetric"] {
+        animation: _kpi-rise linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 60%;
+    }
+    @keyframes _kpi-rise {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+}
+
+/* UI4 — View Transitions hookup (CSS half; JS half in inject_theme) */
+@supports (view-transition-name: auto) {
+    ::view-transition-old(tabpanel),
+    ::view-transition-new(tabpanel) {
+        animation-duration: 280ms;
+        animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}
+
+/* UI8 — Sparkline polishing */
+.sparkline {
+    display: inline-block; vertical-align: middle;
+    width: 80px; height: 18px;
+}
+.sparkline polyline { fill: none; stroke-width: 1.6; }
+.sparkline.up   polyline { stroke: var(--accent); }
+.sparkline.down polyline { stroke: var(--regime-bear); }
+
+/* UI9 — Cmd+K palette modal styling */
+.omni-cmdk-overlay {
+    position: fixed; inset: 0; background: rgba(7, 11, 22, 0.55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    z-index: 9999; display: none; align-items: flex-start; justify-content: center;
+    padding-top: 14vh;
+}
+.omni-cmdk-overlay.open { display: flex; }
+.omni-cmdk-modal {
+    width: min(560px, 92vw);
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border-subtle); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+    overflow: hidden; animation: _cmdk-pop 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes _cmdk-pop {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.omni-cmdk-input {
+    width: 100%; border: 0; outline: 0; background: transparent;
+    padding: 18px 20px; font-size: 1.05rem; color: var(--text-primary);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.omni-cmdk-list { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+.omni-cmdk-list li {
+    padding: 10px 14px; border-radius: 8px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    color: var(--text-secondary);
+}
+.omni-cmdk-list li.active,
+.omni-cmdk-list li:hover {
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    color: var(--text-primary);
+}
+.omni-cmdk-tag {
+    font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 </style>
+"""
+
+
+_VT_AND_CMDK_JS = """
+<script>
+(function () {
+    if (window.__omniThemeBoot) return;
+    window.__omniThemeBoot = true;
+
+    // ---- UI4: View Transitions API for tab switches -------------------
+    function wrapTabClicks() {
+        if (!document.startViewTransition) return;
+        document.querySelectorAll('[role="tab"]').forEach(function (t) {
+            if (t.__omniVT) return;
+            t.__omniVT = true;
+            t.addEventListener('click', function (ev) {
+                if (!document.startViewTransition) return;
+                document.querySelectorAll('[role="tabpanel"]').forEach(function (p) {
+                    p.style.viewTransitionName = 'tabpanel';
+                });
+            }, { capture: true });
+        });
+    }
+
+    // ---- UI9: Cmd/Ctrl+K command palette ------------------------------
+    function makePalette() {
+        if (document.getElementById('omni-cmdk')) return;
+        var ov = document.createElement('div');
+        ov.id = 'omni-cmdk';
+        ov.className = 'omni-cmdk-overlay';
+        ov.innerHTML =
+          '<div class="omni-cmdk-modal">' +
+            '<input class="omni-cmdk-input" placeholder="Jump to a ticker — try SBIN, INFY, AAPL…" />' +
+            '<ul class="omni-cmdk-list"></ul>' +
+          '</div>';
+        document.body.appendChild(ov);
+        var input = ov.querySelector('input');
+        var list  = ov.querySelector('ul');
+
+        // Static seed: filter against suggestions parsed from any visible
+        // selectbox or watchlist labels on the page. Cmd+K stays read-only.
+        function harvestTickers() {
+            var s = new Set();
+            document.querySelectorAll('table td, .pill, [data-testid="stMetricValue"]').forEach(function (e) {
+                var t = (e.textContent || '').trim();
+                if (/^[A-Z][A-Z0-9.\-]{1,12}$/.test(t)) s.add(t);
+            });
+            return Array.from(s);
+        }
+        var pool = [];
+        function refreshPool() { pool = harvestTickers(); }
+        function render(query) {
+            var q = (query || '').toUpperCase();
+            list.innerHTML = '';
+            var filtered = q
+                ? pool.filter(function (p) { return p.indexOf(q) !== -1; })
+                : pool.slice(0, 12);
+            if (filtered.length === 0) {
+                list.innerHTML = '<li><span class="omni-cmdk-tag">no matches</span></li>';
+                return;
+            }
+            filtered.slice(0, 30).forEach(function (t, i) {
+                var li = document.createElement('li');
+                if (i === 0) li.classList.add('active');
+                li.innerHTML = '<span>' + t + '</span><span class="omni-cmdk-tag">jump</span>';
+                li.addEventListener('click', function () {
+                    try {
+                        var u = new URL(window.location.href);
+                        u.searchParams.set('jump', t);
+                        window.location.href = u.toString();
+                    } catch (e) { console.warn('cmdk nav fail', e); }
+                });
+                list.appendChild(li);
+            });
+        }
+        input.addEventListener('input', function () { render(input.value); });
+        function open() { refreshPool(); render(''); ov.classList.add('open'); setTimeout(function () { input.focus(); }, 50); }
+        function close() { ov.classList.remove('open'); input.value = ''; }
+        ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+        document.addEventListener('keydown', function (e) {
+            if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+                e.preventDefault(); open();
+            } else if (e.key === 'Escape') {
+                close();
+            }
+        });
+    }
+
+    function init() {
+        wrapTabClicks();
+        makePalette();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    // Streamlit re-renders DOM frequently — re-bind tabs on mutation
+    new MutationObserver(function () { wrapTabClicks(); })
+        .observe(document.body, { childList: true, subtree: true });
+})();
+</script>
 """
 
 
@@ -646,6 +886,8 @@ def inject_theme() -> None:
     """Inject the modern minimalist CSS + Inter/JetBrains Mono fonts."""
     st.markdown(_FONT_LINK, unsafe_allow_html=True)
     st.markdown(_CSS, unsafe_allow_html=True)
+    # UI4 + UI9 — View Transitions and Cmd+K palette
+    st.markdown(_VT_AND_CMDK_JS, unsafe_allow_html=True)
 
 
 def hero(title: str, subtitle: str = "", kicker: str = "") -> None:
