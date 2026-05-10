@@ -1272,6 +1272,554 @@ _ADVANCED_FX_JS = """
 """
 
 
+# ============================================================================
+# Phase 23.5 — ULTRA FX
+# ============================================================================
+# Stacks ON TOP of Phase 23. Goal: visibly bold, modern, premium feel.
+# Techniques used (all current 2025-2026 web best practices):
+#  A. Aurora mesh gradient background (replaces flat bg)
+#  B. Lighthouse cursor (radial gradient follows cursor across viewport)
+#  C. SVG goo filter on the ambient orbs (liquid clumping)
+#  D. Iridescent / holographic accent shimmer on KPI tiles
+#  E. Custom cursor with delayed follower dot (premium feel)
+#  F. Marquee ticker tape strip at very top of body
+#  G. Slot-roll digit animation on metric values (.ultra-num)
+#  H. Animated outline draw on cards on hover
+#  I. Custom gradient scrollbar (WebKit + Firefox)
+#  J. Staggered first-paint reveal (every direct child of main)
+#  K. text-wrap: balance/pretty + variable-font extreme weight on hero H1
+#  L. Confetti particle burst (canvas) - shift+C or .fx-celebrate trigger
+#  M. Frosted floating bottom-right "live" status pill with pulse
+#  N. Section title underline that draws on view-timeline scroll
+# ============================================================================
+
+_ULTRA_FX_SVG_DEFS = """
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="ultra-goo">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="22" result="blur"/>
+      <feColorMatrix in="blur" mode="matrix"
+        values="1 0 0 0 0   0 1 0 0 0   0 0 1 0 0   0 0 0 22 -10" result="goo"/>
+      <feBlend in="SourceGraphic" in2="goo"/>
+    </filter>
+  </defs>
+</svg>
+
+<div class="ultra-marquee" aria-hidden="true">
+  <div class="ultra-marquee__track">
+    <span>NIFTY 50</span><b class="up">+0.42%</b>
+    <span>SENSEX</span><b class="up">+0.38%</b>
+    <span>BANKNIFTY</span><b class="dn">-0.12%</b>
+    <span>USDINR</span><b>83.42</b>
+    <span>BTC</span><b class="up">+1.84%</b>
+    <span>ETH</span><b class="up">+2.21%</b>
+    <span>S&amp;P 500</span><b class="up">+0.18%</b>
+    <span>NASDAQ</span><b class="up">+0.31%</b>
+    <span>VIX</span><b class="dn">-3.4%</b>
+    <span>GOLD</span><b class="up">+0.66%</b>
+    <span>BRENT</span><b class="dn">-0.22%</b>
+    <span>10Y UST</span><b>4.18%</b>
+    <span>NIFTY 50</span><b class="up">+0.42%</b>
+    <span>SENSEX</span><b class="up">+0.38%</b>
+    <span>BANKNIFTY</span><b class="dn">-0.12%</b>
+    <span>USDINR</span><b>83.42</b>
+    <span>BTC</span><b class="up">+1.84%</b>
+    <span>ETH</span><b class="up">+2.21%</b>
+    <span>S&amp;P 500</span><b class="up">+0.18%</b>
+    <span>NASDAQ</span><b class="up">+0.31%</b>
+    <span>VIX</span><b class="dn">-3.4%</b>
+    <span>GOLD</span><b class="up">+0.66%</b>
+    <span>BRENT</span><b class="dn">-0.22%</b>
+    <span>10Y UST</span><b>4.18%</b>
+  </div>
+</div>
+
+<div class="ultra-lighthouse" aria-hidden="true"></div>
+<div class="ultra-cursor" aria-hidden="true"></div>
+<div class="ultra-cursor-follow" aria-hidden="true"></div>
+
+<div class="ultra-status" aria-hidden="true">
+  <span class="ultra-status__dot"></span>
+  <span class="ultra-status__text">live</span>
+</div>
+
+<canvas class="ultra-confetti" aria-hidden="true"></canvas>
+"""
+
+_ULTRA_FX_CSS = """
+<style>
+/* A. Aurora mesh background */
+@property --aurora-1 { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+@property --aurora-2 { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+  background:
+    radial-gradient(at calc(20% + var(--aurora-1)) 12%,
+      oklch(0.42 0.16 260 / 0.55) 0%, transparent 55%),
+    radial-gradient(at calc(80% - var(--aurora-2)) 18%,
+      oklch(0.45 0.18 310 / 0.45) 0%, transparent 55%),
+    radial-gradient(at 65% calc(85% - var(--aurora-1)),
+      oklch(0.40 0.14 180 / 0.40) 0%, transparent 55%),
+    radial-gradient(at 12% calc(78% + var(--aurora-2)),
+      oklch(0.44 0.20 25 / 0.30) 0%, transparent 60%),
+    linear-gradient(180deg, #07090f 0%, #0a0d18 50%, #06070c 100%) !important;
+  background-attachment: fixed !important;
+  animation: ultra-aurora 22s ease-in-out infinite alternate;
+}
+@keyframes ultra-aurora {
+  0%   { --aurora-1:   0%; --aurora-2:   0%; }
+  50%  { --aurora-1:  18%; --aurora-2:  12%; }
+  100% { --aurora-1: -10%; --aurora-2:  20%; }
+}
+
+/* B. Lighthouse cursor */
+.ultra-lighthouse {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(
+      900px circle at var(--lx, 50%) var(--ly, 50%),
+      color-mix(in oklch, #38bdf8 12%, transparent) 0%,
+      color-mix(in oklch, #a855f7 7%, transparent) 30%,
+      transparent 65%
+    );
+  mix-blend-mode: screen;
+}
+
+/* C. Goo filter on orbs (opt-in via body.fx-goo) */
+body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
+
+/* D. Iridescent KPI tiles */
+[data-testid="stMetric"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from calc(var(--mx, 50) * 1deg) at var(--mx, 50%) var(--my, 50%),
+    transparent 0deg,
+    color-mix(in oklch, #22d3ee 18%, transparent) 60deg,
+    color-mix(in oklch, #a855f7 22%, transparent) 180deg,
+    color-mix(in oklch, #f472b6 18%, transparent) 270deg,
+    transparent 360deg
+  );
+  opacity: 0;
+  mix-blend-mode: overlay;
+  transition: opacity 320ms var(--ease-out-expo);
+  z-index: 2;
+}
+[data-testid="stMetric"]:hover::after { opacity: 0.55; }
+
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em !important;
+  font-variation-settings: "wght" 700;
+  background: linear-gradient(180deg, #f8fafc 0%, color-mix(in oklch, #f8fafc 75%, var(--accent, #38bdf8)) 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,0.4));
+}
+
+/* E. Custom cursor + delayed follower */
+@media (hover: hover) and (pointer: fine) {
+  html { cursor: none; }
+  input, textarea, [contenteditable="true"], select { cursor: text; }
+  a, button, [role="button"], .stButton > button, [data-baseweb="tab"] { cursor: none; }
+
+  .ultra-cursor {
+    position: fixed; top: 0; left: 0;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent, #38bdf8);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 9999;
+    mix-blend-mode: difference;
+    transition: width 180ms var(--spring-snappy), height 180ms var(--spring-snappy);
+  }
+  .ultra-cursor-follow {
+    position: fixed; top: 0; left: 0;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid color-mix(in oklch, var(--accent, #38bdf8) 70%, transparent);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 9998;
+    transition: width 240ms var(--spring-soft), height 240ms var(--spring-soft);
+  }
+  body.ultra-cursor-hot .ultra-cursor { width: 16px; height: 16px; }
+  body.ultra-cursor-hot .ultra-cursor-follow {
+    width: 56px; height: 56px;
+    border-color: color-mix(in oklch, var(--accent, #38bdf8) 100%, transparent);
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .ultra-cursor, .ultra-cursor-follow { display: none; }
+}
+
+/* F. Marquee ticker tape */
+.ultra-marquee {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 28px;
+  z-index: 1002;
+  overflow: hidden;
+  background: color-mix(in oklch, #0b1220 86%, transparent);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  border-bottom: 1px solid color-mix(in oklch, white 8%, transparent);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 4%, black 96%, transparent);
+          mask-image: linear-gradient(90deg, transparent, black 4%, black 96%, transparent);
+}
+.ultra-marquee__track {
+  display: inline-flex;
+  gap: 28px;
+  align-items: center;
+  white-space: nowrap;
+  padding: 6px 0;
+  height: 28px;
+  animation: ultra-mqr 60s linear infinite;
+}
+.ultra-marquee__track > span { color: rgba(226,232,240,0.7); }
+.ultra-marquee__track > b { color: rgba(226,232,240,0.95); margin-right: 8px; font-weight: 600; }
+.ultra-marquee__track > b.up { color: #4ade80; }
+.ultra-marquee__track > b.dn { color: #f87171; }
+.ultra-marquee:hover .ultra-marquee__track { animation-play-state: paused; }
+@keyframes ultra-mqr { to { transform: translateX(-50%); } }
+.stApp [data-testid="stHeader"] { top: 28px !important; }
+.stApp { padding-top: 28px; }
+
+/* G. Slot-roll digits */
+.ultra-digit {
+  display: inline-block;
+  width: 0.62em;
+  height: 1em;
+  line-height: 1em;
+  overflow: hidden;
+  vertical-align: baseline;
+}
+.ultra-digit__strip {
+  display: flex;
+  flex-direction: column;
+  height: 1000%;
+  transition: transform 1100ms var(--ease-out-expo);
+  will-change: transform;
+}
+.ultra-digit__strip > span { height: 10%; display: block; text-align: center; }
+
+/* H. Outline draw on cards */
+[data-testid="stMetric"] {
+  outline: 1px solid transparent;
+  outline-offset: 0;
+  transition:
+    outline-color 320ms var(--ease-out-expo),
+    outline-offset 320ms var(--ease-out-expo),
+    transform 380ms var(--spring-soft),
+    border-color 220ms var(--ease-out-expo),
+    box-shadow 220ms var(--ease-out-expo);
+}
+[data-testid="stMetric"]:hover {
+  outline-color: color-mix(in oklch, var(--accent, #38bdf8) 70%, transparent);
+  outline-offset: 4px;
+}
+
+/* I. Gradient scrollbar */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in oklch, #38bdf8 65%, transparent) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #38bdf8, #a855f7);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #22d3ee, #ec4899);
+  background-clip: padding-box;
+}
+
+/* J. Staggered first-paint reveal */
+@keyframes ultra-fade-in-up {
+  from { opacity: 0; transform: translateY(14px); filter: blur(8px); }
+  to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+[data-testid="stAppViewContainer"] section.main > div > div > div > [data-testid] {
+  animation: ultra-fade-in-up 720ms var(--ease-out-expo) both;
+  animation-delay: calc(var(--ultra-stagger, 0) * 60ms);
+}
+
+/* K. Typography polish */
+h1, h2, h3 { text-wrap: balance; }
+p, [data-testid="stMarkdownContainer"] p { text-wrap: pretty; hanging-punctuation: first last; }
+.hero h1 {
+  font-variation-settings: "wght" 820;
+  letter-spacing: -0.04em;
+  background: linear-gradient(100deg, #f8fafc 0%, #c0d6ff 32%, #a855f7 55%, #22d3ee 78%, #f8fafc 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ultra-shimmer 8s linear infinite;
+}
+@keyframes ultra-shimmer { to { background-position: -200% 0; } }
+
+/* L. Confetti */
+.ultra-confetti {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh;
+  pointer-events: none;
+  z-index: 1003;
+  display: block;
+  opacity: 0;
+  transition: opacity 280ms var(--ease-out-expo);
+}
+.ultra-confetti.is-active { opacity: 1; }
+
+/* M. Floating "live" status pill */
+.ultra-status {
+  position: fixed;
+  bottom: 18px; right: 18px;
+  z-index: 1002;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in oklch, #0b1220 70%, transparent);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid color-mix(in oklch, white 10%, transparent);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(226,232,240,0.85);
+  box-shadow: 0 8px 32px -12px rgba(0,0,0,0.6);
+}
+.ultra-status__dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: ultra-pulse-dot 1.8s var(--ease-out-expo) infinite;
+}
+@keyframes ultra-pulse-dot {
+  0%   { box-shadow: 0 0 0 0   rgba(74,222,128,0.6); }
+  70%  { box-shadow: 0 0 0 12px rgba(74,222,128,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(74,222,128,0);   }
+}
+
+/* N. Section title underline (scroll-driven) */
+@supports (animation-timeline: view()) {
+  h2 { position: relative; }
+  h2::after {
+    content: "";
+    position: absolute;
+    left: 0; bottom: -6px;
+    height: 2px;
+    width: 0%;
+    background: linear-gradient(90deg, #38bdf8, #a855f7, #22d3ee);
+    border-radius: 2px;
+    animation: ultra-underline linear both;
+    animation-timeline: view();
+    animation-range: entry 10% cover 35%;
+  }
+  @keyframes ultra-underline { to { width: 64px; } }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html, body, .stApp, [data-testid="stAppViewContainer"] { animation: none !important; }
+  .ultra-marquee__track, .hero h1, .ultra-status__dot { animation: none !important; }
+  .ultra-lighthouse { display: none; }
+}
+</style>
+"""
+
+_ULTRA_FX_JS = """
+<script>
+(function(){
+  if (window.__ultraBound) return;
+  window.__ultraBound = true;
+
+  const lh = document.querySelector('.ultra-lighthouse');
+  const cur = document.querySelector('.ultra-cursor');
+  const fol = document.querySelector('.ultra-cursor-follow');
+  let mx = window.innerWidth / 2, my = window.innerHeight / 2;
+  let fx = mx, fy = my;
+
+  function onMove(e){
+    mx = e.clientX; my = e.clientY;
+    if (lh) {
+      lh.style.setProperty('--lx', mx + 'px');
+      lh.style.setProperty('--ly', my + 'px');
+    }
+    if (cur) cur.style.transform = 'translate(' + mx + 'px,' + my + 'px) translate(-50%,-50%)';
+  }
+  document.addEventListener('mousemove', onMove, { passive: true });
+
+  function tickFollower(){
+    fx += (mx - fx) * 0.18;
+    fy += (my - fy) * 0.18;
+    if (fol) fol.style.transform = 'translate(' + fx + 'px,' + fy + 'px) translate(-50%,-50%)';
+    requestAnimationFrame(tickFollower);
+  }
+  tickFollower();
+
+  function bindHot(el){
+    if (el.__ultraHot) return;
+    el.__ultraHot = true;
+    el.addEventListener('mouseenter', () => document.body.classList.add('ultra-cursor-hot'));
+    el.addEventListener('mouseleave', () => document.body.classList.remove('ultra-cursor-hot'));
+  }
+  function rebindHot(){
+    document.querySelectorAll(
+      'a, button, [role="button"], .stButton > button, [data-baseweb="tab"], ' +
+      '[data-testid="stMetric"], [data-testid="stExpander"] > details summary'
+    ).forEach(bindHot);
+  }
+  rebindHot();
+
+  function buildSlotRoll(el){
+    if (el.__ultraRolled) return;
+    const raw = (el.getAttribute('data-num') || el.textContent || '').trim();
+    if (!raw) return;
+    el.__ultraRolled = true;
+    el.innerHTML = '';
+    for (const ch of raw) {
+      if (ch >= '0' && ch <= '9') {
+        const d = parseInt(ch, 10);
+        const wrap = document.createElement('span');
+        wrap.className = 'ultra-digit';
+        const strip = document.createElement('span');
+        strip.className = 'ultra-digit__strip';
+        for (let i = 0; i < 10; i++) {
+          const s = document.createElement('span');
+          s.textContent = String(i);
+          strip.appendChild(s);
+        }
+        wrap.appendChild(strip);
+        el.appendChild(wrap);
+        requestAnimationFrame(() => {
+          strip.style.transform = 'translateY(-' + (d * 10) + '%)';
+        });
+      } else {
+        const lit = document.createElement('span');
+        lit.textContent = ch;
+        el.appendChild(lit);
+      }
+    }
+  }
+  function rollAll(){ document.querySelectorAll('.ultra-num').forEach(buildSlotRoll); }
+  rollAll();
+
+  function stagger(){
+    document.querySelectorAll(
+      '[data-testid="stAppViewContainer"] section.main > div > div > div > [data-testid]'
+    ).forEach((el, i) => {
+      if (!el.style.getPropertyValue('--ultra-stagger')) {
+        el.style.setProperty('--ultra-stagger', String(Math.min(i, 24)));
+      }
+    });
+  }
+  stagger();
+
+  const mo = new MutationObserver(function(){
+    if (window.__ultraRaf) return;
+    window.__ultraRaf = requestAnimationFrame(function(){
+      window.__ultraRaf = null;
+      rebindHot(); rollAll(); stagger();
+    });
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+
+  // Confetti
+  const cv = document.querySelector('.ultra-confetti');
+  function celebrate(opts){
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width  = window.innerWidth * dpr;
+    cv.height = window.innerHeight * dpr;
+    cv.style.width  = window.innerWidth + 'px';
+    cv.style.height = window.innerHeight + 'px';
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const W = window.innerWidth, H = window.innerHeight;
+    const colors = ['#38bdf8','#a855f7','#22d3ee','#f472b6','#4ade80','#fbbf24'];
+    const N = (opts && opts.count) || 160;
+    const ox = (opts && opts.x) || W * 0.5;
+    const oy = (opts && opts.y) || H * 0.4;
+    const parts = [];
+    for (let i = 0; i < N; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 8;
+      parts.push({
+        x: ox, y: oy,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed - 4,
+        r: 3 + Math.random() * 4,
+        c: colors[(Math.random() * colors.length) | 0],
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.4,
+        life: 0,
+        ttl: 90 + Math.random() * 40,
+      });
+    }
+    cv.classList.add('is-active');
+    let frames = 0;
+    function step(){
+      ctx.clearRect(0, 0, W, H);
+      let alive = 0;
+      for (const p of parts) {
+        p.life++;
+        if (p.life > p.ttl) continue;
+        alive++;
+        p.vy += 0.18;
+        p.vx *= 0.992; p.vy *= 0.996;
+        p.x += p.vx; p.y += p.vy;
+        p.rot += p.vr;
+        const a = Math.max(0, 1 - p.life / p.ttl);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.c;
+        ctx.globalAlpha = a;
+        ctx.fillRect(-p.r, -p.r * 0.4, p.r * 2, p.r * 0.8);
+        ctx.restore();
+      }
+      frames++;
+      if (alive > 0 && frames < 240) {
+        requestAnimationFrame(step);
+      } else {
+        ctx.clearRect(0, 0, W, H);
+        cv.classList.remove('is-active');
+      }
+    }
+    step();
+  }
+  window.OmniCelebrate = celebrate;
+
+  new MutationObserver(function(){
+    if (document.body.classList.contains('fx-celebrate')) {
+      celebrate({});
+      document.body.classList.remove('fx-celebrate');
+    }
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+  document.addEventListener('keydown', function(e){
+    if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+    if (e.shiftKey && (e.key === 'C' || e.key === 'c')) celebrate({});
+  });
+})();
+</script>
+"""
+
+
 def inject_theme() -> None:
     """Inject the modern minimalist CSS + Inter/JetBrains Mono fonts."""
     st.markdown(_FONT_LINK, unsafe_allow_html=True)
@@ -1281,6 +1829,11 @@ def inject_theme() -> None:
     # Phase 23 — cutting-edge effects layer (glass + spotlight + orbs + spring)
     st.markdown(_ADVANCED_FX_CSS, unsafe_allow_html=True)
     st.markdown(_ADVANCED_FX_JS, unsafe_allow_html=True)
+    # Phase 23.5 — ULTRA FX (aurora mesh, lighthouse, goo, iridescence,
+    # custom cursor, slot-roll numbers, gradient scrollbar, confetti)
+    st.markdown(_ULTRA_FX_SVG_DEFS, unsafe_allow_html=True)
+    st.markdown(_ULTRA_FX_CSS, unsafe_allow_html=True)
+    st.markdown(_ULTRA_FX_JS, unsafe_allow_html=True)
 
 
 def hero(title: str, subtitle: str = "", kicker: str = "") -> None:
