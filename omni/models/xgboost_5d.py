@@ -145,6 +145,12 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         objective="binary:logistic", eval_metric="logloss",
         tree_method="hist", random_state=42,
     )
+    # Phase 22 — opt-in GPU: set OMNI_XGB_DEVICE=cuda to use the local GPU.
+    # Defaults to CPU so existing CI / non-GPU envs keep working.
+    import os as _os
+    _dev = _os.environ.get("OMNI_XGB_DEVICE", "").strip().lower()
+    if _dev in ("cuda", "gpu"):
+        params["device"] = "cuda"
     if xgb_params:
         params.update(xgb_params)
 

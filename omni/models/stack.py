@@ -66,12 +66,16 @@ class StackResult:
 
 def _new_xgb():
     import xgboost as xgb
-    return xgb.XGBClassifier(
+    import os
+    kwargs = dict(
         n_estimators=400, max_depth=5, learning_rate=0.05,
         subsample=0.85, colsample_bytree=0.85,
         reg_lambda=1.0, tree_method="hist",
         eval_metric="auc", n_jobs=-1, verbosity=0,
     )
+    if os.environ.get("OMNI_XGB_DEVICE", "").strip().lower() in ("cuda", "gpu"):
+        kwargs["device"] = "cuda"
+    return xgb.XGBClassifier(**kwargs)
 
 
 def _new_hgb():
@@ -85,11 +89,17 @@ def _new_hgb():
 def _new_lgb():
     if lgb is None:
         return None
-    return lgb.LGBMClassifier(
+    import os
+    kwargs = dict(
         n_estimators=500, max_depth=-1, learning_rate=0.04,
         num_leaves=63, subsample=0.85, colsample_bytree=0.85,
         reg_lambda=1.0, n_jobs=-1, verbose=-1,
     )
+    if os.environ.get("OMNI_LGB_DEVICE", "").strip().lower() in ("cuda", "gpu"):
+        kwargs["device"] = "gpu"
+        kwargs["gpu_platform_id"] = 0
+        kwargs["gpu_device_id"] = 0
+    return lgb.LGBMClassifier(**kwargs)
 
 
 def _new_cb():
