@@ -882,12 +882,405 @@ _VT_AND_CMDK_JS = """
 """
 
 
+# ============================================================================
+# Phase 23 — CUTTING-EDGE FX LAYER
+# ----------------------------------------------------------------------------
+# Stacked on top of the base theme. Each technique below is independently
+# disable-able via CSS class toggle. Designed against current (2025) baseline:
+# Chromium 120+, Firefox 121+, Safari 17.4+. Falls back gracefully where
+# `@supports` is absent.
+#
+#  1. Cursor-reactive spotlight on cards (mousemove -> --mx/--my CSS vars)
+#  2. Glassmorphism with backdrop-filter saturate+blur on metric containers
+#  3. Three ambient conic-gradient orbs (regime-aware hues)
+#  4. CSS spring easing via `linear()` timing function
+#  5. Variable-font weight breathing on interactive headings
+#  6. SVG turbulence noise grain overlay (extremely subtle)
+#  7. Scroll-progress bar pinned to top, scroll-driven via animation-timeline
+#  8. Skeleton shimmer using mask-image gradient sweep
+#  9. Live-pulse rings on data-fresh indicators
+# 10. @property animated counters (count-up on number metrics)
+# 11. CSS-only 3D tilt cards (perspective + transform-style)
+# 12. Magnetic buttons (cursor pulls primary action toward itself)
+# 13. Glow trails on focused / active KPI tiles
+# 14. Theme-color meta sync so OS chrome (mobile/PWA) follows the site
+# 15. prefers-reduced-motion: every animation respects user preference
+# ============================================================================
+
+_ADVANCED_FX_CSS = """
+<style>
+/* ---- 4. Spring easing tokens (CSS linear() timing) -------------------- */
+:root {
+  --spring-snappy: linear(
+    0, 0.009, 0.035, 0.078, 0.137, 0.211, 0.298, 0.396, 0.501, 0.609,
+    0.717, 0.819, 0.911, 0.987, 1.043, 1.077, 1.087, 1.075, 1.045, 1.005,
+    0.962, 0.924, 0.895, 0.879, 0.876, 0.886, 0.905, 0.93, 0.957, 0.984, 1
+  );
+  --spring-soft: linear(
+    0, 0.014, 0.054, 0.119, 0.205, 0.308, 0.422, 0.541, 0.658, 0.768,
+    0.864, 0.943, 1.0, 1.034, 1.046, 1.04, 1.022, 0.997, 0.972, 0.953,
+    0.943, 0.943, 0.951, 0.964, 0.98, 0.994, 1
+  );
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---- 6. SVG noise grain overlay (very subtle, no animation) ----------- */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0.025;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+
+/* ---- 3. Ambient conic-gradient orbs ----------------------------------- */
+@property --orb-hue { syntax: "<number>"; inherits: false; initial-value: 220; }
+.fx-orb {
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  width: 42vmax;
+  height: 42vmax;
+  border-radius: 50%;
+  filter: blur(80px) saturate(1.4);
+  opacity: 0.32;
+  mix-blend-mode: screen;
+  background:
+    conic-gradient(
+      from 0deg,
+      hsl(var(--orb-hue) 80% 60%),
+      hsl(calc(var(--orb-hue) + 60) 80% 55%),
+      hsl(calc(var(--orb-hue) + 120) 80% 60%),
+      hsl(var(--orb-hue) 80% 60%)
+    );
+  animation: fx-orb-spin 28s linear infinite,
+             fx-orb-hue 14s ease-in-out infinite alternate;
+}
+.fx-orb.o1 { top: -20vmax; left: -15vmax; --orb-hue: 220; animation-delay: 0s, 0s; }
+.fx-orb.o2 { bottom: -22vmax; right: -18vmax; --orb-hue: 290; animation-delay: -9s, -3s; opacity: 0.22; }
+.fx-orb.o3 { top: 30vh; right: -25vmax; --orb-hue: 175; animation-delay: -18s, -7s; opacity: 0.18; }
+@keyframes fx-orb-spin { to { transform: rotate(360deg); } }
+@keyframes fx-orb-hue  { to { --orb-hue: 360; } }
+
+/* ---- 2. Glassmorphism on metric containers --------------------------- */
+[data-testid="stMetric"],
+[data-testid="stExpander"] > details,
+.stTabs [data-baseweb="tab-panel"] > div {
+  position: relative;
+  border-radius: 16px !important;
+  background: color-mix(in oklch, var(--surface, #0f172a) 72%, transparent) !important;
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border: 1px solid color-mix(in oklch, white 8%, transparent) !important;
+  transition:
+    transform 380ms var(--spring-soft),
+    border-color 220ms var(--ease-out-expo),
+    box-shadow 220ms var(--ease-out-expo);
+}
+
+/* ---- 1 + 13. Cursor-reactive spotlight overlay ----------------------- */
+[data-testid="stMetric"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      420px circle at var(--mx, 50%) var(--my, 50%),
+      color-mix(in oklch, var(--accent, #38bdf8) 28%, transparent) 0%,
+      transparent 55%
+    );
+  opacity: 0;
+  transition: opacity 320ms var(--ease-out-expo);
+  z-index: 0;
+}
+[data-testid="stMetric"]:hover::before { opacity: 1; }
+[data-testid="stMetric"] > * { position: relative; z-index: 1; }
+[data-testid="stMetric"]:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--accent, #38bdf8) 50%, transparent) !important;
+  box-shadow:
+    0 18px 40px -22px color-mix(in oklch, var(--accent, #38bdf8) 60%, black),
+    0 0 0 1px color-mix(in oklch, var(--accent, #38bdf8) 25%, transparent) inset;
+}
+
+/* ---- 11. CSS-only 3D tilt cards (very subtle) ------------------------ */
+.fx-tilt {
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+.fx-tilt > * {
+  transform:
+    rotateX(calc((var(--my, 50%) - 50%) * -0.04))
+    rotateY(calc((var(--mx, 50%) - 50%) *  0.04));
+  transition: transform 420ms var(--spring-soft);
+}
+
+/* ---- 12. Magnetic buttons -------------------------------------------- */
+.stButton > button,
+button[kind="primary"] {
+  position: relative;
+  border-radius: 12px !important;
+  transition:
+    transform 260ms var(--spring-snappy),
+    background 200ms var(--ease-out-expo),
+    box-shadow 200ms var(--ease-out-expo) !important;
+}
+.stButton > button:hover {
+  transform: translate(
+    calc((var(--mx, 50%) - 50%) * 0.08),
+    calc((var(--my, 50%) - 50%) * 0.08)
+  ) scale(1.02);
+  box-shadow: 0 10px 28px -10px color-mix(in oklch, var(--accent, #38bdf8) 80%, black);
+}
+
+/* ---- 5. Variable-font weight breathing ------------------------------- */
+h1, h2, h3, .hero h1 {
+  font-variation-settings: "wght" 600;
+  transition: font-variation-settings 600ms var(--ease-out-expo),
+              letter-spacing 600ms var(--ease-out-expo);
+}
+h1:hover, h2:hover, h3:hover, .hero:hover h1 {
+  font-variation-settings: "wght" 760;
+  letter-spacing: -0.005em;
+}
+
+/* ---- 7. Scroll-progress bar (top, scroll-driven) --------------------- */
+@supports (animation-timeline: scroll()) {
+  body::after {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    height: 2px;
+    width: 100%;
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    background: linear-gradient(90deg,
+      color-mix(in oklch, var(--accent, #38bdf8) 100%, transparent),
+      color-mix(in oklch, #a855f7 100%, transparent));
+    z-index: 1001;
+    animation: fx-scroll-progress linear;
+    animation-timeline: scroll(root);
+  }
+  @keyframes fx-scroll-progress { to { transform: scaleX(1); } }
+}
+
+/* ---- 9. Live pulse rings (apply via class .fx-pulse) ----------------- */
+.fx-pulse {
+  position: relative;
+  display: inline-block;
+}
+.fx-pulse::before,
+.fx-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 50%;
+  width: 8px; height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--accent, #22c55e);
+  animation: fx-pulse-ring 1.6s var(--ease-out-expo) infinite;
+}
+.fx-pulse::after { animation-delay: 0.8s; }
+@keyframes fx-pulse-ring {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(4.2); opacity: 0;   }
+}
+
+/* ---- 8. Skeleton shimmer (apply via class .fx-skeleton) -------------- */
+.fx-skeleton {
+  background: linear-gradient(90deg,
+    color-mix(in oklch, white 6%, transparent) 0%,
+    color-mix(in oklch, white 14%, transparent) 50%,
+    color-mix(in oklch, white 6%, transparent) 100%);
+  background-size: 200% 100%;
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 18%, black 82%, transparent);
+          mask-image: linear-gradient(90deg, transparent, black 18%, black 82%, transparent);
+  animation: fx-shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+@keyframes fx-shimmer { to { background-position: -200% 0; } }
+
+/* ---- 10. @property count-up (apply via .fx-counter[data-target]) ----- */
+@property --counter-num { syntax: "<number>"; inherits: false; initial-value: 0; }
+.fx-counter {
+  --counter-num: 0;
+  counter-reset: c var(--counter-num);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  transition: --counter-num 1.2s var(--ease-out-expo);
+}
+.fx-counter::after { content: counter(c); }
+
+/* ---- Bento-grid friendly container queries --------------------------- */
+@container (min-width: 760px) {
+  .bento-grid { grid-template-columns: 2fr 1fr 1fr; }
+}
+@container (min-width: 1100px) {
+  .bento-grid { grid-template-columns: 2fr 1fr 1fr 1fr; }
+}
+
+/* ---- 15. Reduced-motion respect -------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .fx-orb,
+  body::before,
+  body::after,
+  .fx-pulse::before,
+  .fx-pulse::after,
+  .fx-skeleton {
+    animation: none !important;
+  }
+  *, *::before, *::after { transition-duration: 0.001ms !important; }
+}
+
+/* ---- Sidebar polish: floating nav with frosted glass ----------------- */
+section[data-testid="stSidebar"] {
+  background: color-mix(in oklch, var(--bg, #0b1220) 80%, transparent) !important;
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-right: 1px solid color-mix(in oklch, white 6%, transparent);
+}
+
+/* Tab strip — pill-style with sliding indicator */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--surface, #0f172a) 60%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in oklch, white 6%, transparent);
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: 10px !important;
+  padding: 8px 14px !important;
+  transition: all 280ms var(--ease-out-expo);
+}
+.stTabs [aria-selected="true"] {
+  background: color-mix(in oklch, var(--accent, #38bdf8) 18%, transparent) !important;
+  color: var(--accent, #38bdf8) !important;
+}
+
+/* DataFrame: subtle row hover with gradient border-left */
+[data-testid="stDataFrame"] tbody tr {
+  transition: background 180ms var(--ease-out-expo);
+}
+[data-testid="stDataFrame"] tbody tr:hover {
+  background: color-mix(in oklch, var(--accent, #38bdf8) 8%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--accent, #38bdf8);
+}
+</style>
+
+<!-- The three ambient orbs -->
+<div class="fx-orb o1" aria-hidden="true"></div>
+<div class="fx-orb o2" aria-hidden="true"></div>
+<div class="fx-orb o3" aria-hidden="true"></div>
+
+<!-- 14. theme-color sync for browser chrome -->
+<meta name="theme-color" content="#0b1220" id="fx-theme-meta">
+"""
+
+_ADVANCED_FX_JS = """
+<script>
+(function(){
+  if (window.__fxAdvancedBound) return;
+  window.__fxAdvancedBound = true;
+
+  // 1+13. Cursor spotlight + magnetic buttons: write --mx/--my on hovered cards.
+  function bindCardSpotlight(root){
+    const cards = root.querySelectorAll(
+      '[data-testid="stMetric"], .stButton > button, .fx-tilt, [data-testid="stExpander"] > details'
+    );
+    cards.forEach(function(el){
+      if (el.__fxBound) return;
+      el.__fxBound = true;
+      el.addEventListener('mousemove', function(e){
+        const r = el.getBoundingClientRect();
+        const mx = ((e.clientX - r.left) / r.width)  * 100;
+        const my = ((e.clientY - r.top)  / r.height) * 100;
+        el.style.setProperty('--mx', mx + '%');
+        el.style.setProperty('--my', my + '%');
+      }, { passive: true });
+      el.addEventListener('mouseleave', function(){
+        el.style.setProperty('--mx', '50%');
+        el.style.setProperty('--my', '50%');
+      });
+    });
+  }
+
+  // 10. @property count-up: animate the --counter-num CSS var to data-target.
+  function bindCounters(root){
+    const els = root.querySelectorAll('.fx-counter[data-target]');
+    els.forEach(function(el){
+      if (el.__fxCounted) return;
+      el.__fxCounted = true;
+      const target = parseFloat(el.getAttribute('data-target')) || 0;
+      // Force a reflow before flipping the CSS var so the transition triggers.
+      void el.offsetWidth;
+      el.style.setProperty('--counter-num', target);
+    });
+  }
+
+  // 14. Theme-color meta sync to current accent.
+  function syncThemeMeta(){
+    try {
+      const accent = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+      const meta = document.getElementById('fx-theme-meta');
+      if (meta && accent) meta.setAttribute('content', accent);
+    } catch (e) {}
+  }
+
+  function tick(){
+    bindCardSpotlight(document);
+    bindCounters(document);
+    syncThemeMeta();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tick);
+  } else {
+    tick();
+  }
+
+  // Streamlit re-renders frequently — re-bind on DOM mutation.
+  const mo = new MutationObserver(function(){
+    // throttle: skip if a tick is already queued this frame
+    if (window.__fxRaf) return;
+    window.__fxRaf = requestAnimationFrame(function(){
+      window.__fxRaf = null;
+      tick();
+    });
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+
+  // Keyboard: 'g' then 'd' jumps to dashboard top with smooth scroll.
+  let lastKey = '', lastTime = 0;
+  document.addEventListener('keydown', function(e){
+    if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+    const now = Date.now();
+    if (lastKey === 'g' && e.key === 'd' && (now - lastTime) < 800) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    lastKey = e.key;
+    lastTime = now;
+  });
+})();
+</script>
+"""
+
+
 def inject_theme() -> None:
     """Inject the modern minimalist CSS + Inter/JetBrains Mono fonts."""
     st.markdown(_FONT_LINK, unsafe_allow_html=True)
     st.markdown(_CSS, unsafe_allow_html=True)
     # UI4 + UI9 — View Transitions and Cmd+K palette
     st.markdown(_VT_AND_CMDK_JS, unsafe_allow_html=True)
+    # Phase 23 — cutting-edge effects layer (glass + spotlight + orbs + spring)
+    st.markdown(_ADVANCED_FX_CSS, unsafe_allow_html=True)
+    st.markdown(_ADVANCED_FX_JS, unsafe_allow_html=True)
 
 
 def hero(title: str, subtitle: str = "", kicker: str = "") -> None:

@@ -44,6 +44,12 @@ def _parse_args() -> argparse.Namespace:
                     help="comma-separated forward horizons in trading days")
     p.add_argument("--output", default=None,
                     help="override output path (default: data/lake/training/training_set.parquet)")
+    p.add_argument("--embed-since", default="2024-01-01",
+                    help="only attach news headlines for dates >= this ISO date "
+                         "(controls Nemotron embedding API call volume; "
+                         "older dates get zero-embeddings, same as before).")
+    p.add_argument("--no-news", action="store_true",
+                    help="skip news plumbing entirely (emb_* will be all zeros)")
     return p.parse_args()
 
 
@@ -87,6 +93,22 @@ def main() -> int:
         log.warning("no quarterly fundamentals in lake; running without (run "
                      "scripts/backfill_quarterly.py to enable)")
 
+    # ------------------------------------------------------------------
+    # Phase 23 — load all news ONCE so embeddings actually populate during
+    # build_features_inline. Previously sentiment=None made emb_* all-zero.
+    # We cap the embed window via --embed-since to keep Nemotron calls finite.
+    # ------------------------------------------------------------------
+    news_all = pd.DataFrame()
+    if not args.no_news:
+        try:
+            today_iso = pd.Timestamp.now(tz="UTC").date().isoformat()
+            news_all = lake_io.read_news_window(args.embed_since, today_iso)
+            log.info(f"news loaded for embedding: {len(news_all):,} headlines "
+                     f"({args.embed_since} -> {today_iso})")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"news load failed: {exc}; emb_* will be zeros")
+            news_all = pd.DataFrame()
+
     parts: list[pd.DataFrame] = []
     t0 = time.time()
     for i, (ticker, ac) in enumerate(pairs, 1):
@@ -95,10 +117,26 @@ def main() -> int:
             continue
         ticker_fund = (fund_all[fund_all.get("ticker", "") == ticker]
                         if not fund_all.empty else pd.DataFrame())
+
+        # Phase 23 — per-ticker news proxy. build_features_inline reads
+        # sentiment.attrs["news_raw"]; an empty df with attrs is enough.
+        ticker_sent = pd.DataFrame()
+        if not news_all.empty:
+            sym = ticker.upper().replace(".NS", "").replace(".BO", "")
+            if "ticker_hint" in news_all.columns:
+                m = news_all["ticker_hint"].astype(str).str.upper().str.contains(sym, na=False)
+                ticker_news = news_all[m] if m.any() else pd.DataFrame()
+            else:
+                # No ticker hint column — pass full news; embed_daily_news
+                # will day-filter and dedupe via cache.
+                ticker_news = news_all
+            if not ticker_news.empty:
+                ticker_sent.attrs["news_raw"] = ticker_news
+
         feats = build_features_inline(
             ac, ticker, prices,
             fundamentals=ticker_fund if not ticker_fund.empty else None,
-            sentiment=None,    # historical news not yet in lake; later step
+            sentiment=ticker_sent,
             macro=None,        # macro joined at training time separately
             horizons=horizons,
         )

@@ -4,8 +4,8 @@
 
 ```
                     variant  proba_up  blended_p  direction  conviction  elapsed_s
-baseline (emb+microstr OFF)    0.5405     0.5214          1         4.3     135.18
-       with new features ON    0.5405     0.5214          1         4.3      24.73
+baseline (emb+microstr OFF)    0.5457     0.5245          1         4.9      23.43
+       with new features ON    0.5457     0.5245          1         4.9      65.02
 ```
 
 proba_up delta = `0.0000`
@@ -28,5 +28,5 @@ delivery_pct_z_60d   37          -0.2226          0.4941       -0.0059
 
 ## Speed
 
-- baseline: 135.18s
-- with new: 24.73s (overhead -110.45s)
+- baseline: 23.43s
+- with new: 65.02s (overhead +41.59s)

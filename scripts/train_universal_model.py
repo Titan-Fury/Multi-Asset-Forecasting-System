@@ -147,7 +147,30 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
     dates = pd.to_datetime(sub["date"])
 
     log.info(f"[h={horizon}/stack/{target_kind}] fit_stack on {X.shape}, folds={n_folds}")
-    sr = fit_stack(X, y, dates, horizon_days=horizon, n_folds=n_folds)
+    # Phase 23 — thread panel info so N-HiTS can join the stack as a 5th base.
+    tickers_panel = sub["ticker"].astype(str) if "ticker" in sub.columns else None
+    if "close" in sub.columns:
+        closes_panel = sub["close"].astype(float)
+    elif "adj_close" in sub.columns:
+        closes_panel = sub["adj_close"].astype(float)
+    elif "log_ret_1d" in sub.columns and tickers_panel is not None:
+        # Reconstruct synthetic close = exp(cumulative log returns) per ticker.
+        # Adequate for N-HiTS — relative shape is what matters for forecasting.
+        tmp = sub[["ticker", "date", "log_ret_1d"]].copy()
+        tmp["log_ret_1d"] = pd.to_numeric(tmp["log_ret_1d"], errors="coerce").fillna(0.0)
+        tmp = tmp.sort_values(["ticker", "date"])
+        tmp["cum_lret"] = tmp.groupby("ticker")["log_ret_1d"].cumsum()
+        tmp["synth_close"] = np.exp(tmp["cum_lret"])
+        tmp = tmp.reindex(sub.index)  # back to original order
+        closes_panel = tmp["synth_close"].astype(float)
+        log.info("N-HiTS: using synthetic close from cumulative log returns")
+    else:
+        closes_panel = None
+    sr = fit_stack(
+        X, y, dates,
+        horizon_days=horizon, n_folds=n_folds,
+        tickers=tickers_panel, closes=closes_panel,
+    )
 
     out_dir = Path("data/models"); out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"stack_h{horizon}.pkl"

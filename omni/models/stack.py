@@ -16,6 +16,7 @@ on the inference path.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,7 @@ def _try_import(name: str):
 
 lgb = _try_import("lightgbm")
 cb = _try_import("catboost")
+nf = _try_import("neuralforecast")
 
 
 @dataclass
@@ -111,6 +113,18 @@ def _new_cb():
     )
 
 
+def _new_nhits(horizon_days: int = 5):
+    if nf is None:
+        return None
+    from omni.models.nhits import NHiTSBinaryClassifier, _NF_AVAILABLE
+    if not _NF_AVAILABLE:
+        return None
+    return NHiTSBinaryClassifier(
+        horizon_days=horizon_days,
+        input_size=64, max_steps=300,
+    )
+
+
 def fit_stack(
     X: pd.DataFrame,
     y: np.ndarray,
@@ -119,8 +133,15 @@ def fit_stack(
     horizon_days: int = 5,
     n_folds: int = 5,
     embargo_days: int | None = None,
+    tickers: pd.Series | None = None,
+    closes: pd.Series | None = None,
 ) -> StackResult:
-    """Train a stacking ensemble with purged K-fold OOF predictions."""
+    """Train a stacking ensemble with purged K-fold OOF predictions.
+
+    Phase 23: ``tickers`` + ``closes`` are optional panel inputs consumed only
+    by the N-HiTS base. Other bases ignore them. When both are provided AND
+    neuralforecast is installed, NHITS is added as a 5th base learner.
+    """
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import roc_auc_score
 
@@ -134,12 +155,22 @@ def fit_stack(
     base_specs: dict[str, Any] = {"xgb": _new_xgb, "hgb": _new_hgb}
     if lgb is not None: base_specs["lgb"] = _new_lgb
     if cb is not None:  base_specs["cb"]  = _new_cb
+    has_panel = (tickers is not None and closes is not None)
+    use_nhits = (nf is not None and has_panel
+                 and os.environ.get("OMNI_DISABLE_NHITS", "0") != "1")
+    if use_nhits:
+        base_specs["nhits"] = lambda: _new_nhits(horizon_days=horizon_days)
 
     medians = X.median(numeric_only=True).fillna(0.0)
     X_filled = X.fillna(medians).fillna(0.0)
     feat_cols = list(X.columns)
     n = len(X)
     oof = {name: np.full(n, np.nan) for name in base_specs}
+
+    dates_arr = pd.to_datetime(pd.Series(dates).values) if has_panel else None
+    tickers_arr = pd.Series(tickers).astype(str).values if has_panel else None
+    closes_arr = (pd.to_numeric(pd.Series(closes), errors="coerce").to_numpy()
+                  if has_panel else None)
 
     for k, (tr, va) in enumerate(folds):
         Xtr = X_filled.iloc[tr].to_numpy(dtype=float)
@@ -148,11 +179,24 @@ def fit_stack(
         for name, mk in base_specs.items():
             try:
                 m = mk()
-                m.fit(Xtr, ytr)
-                if hasattr(m, "predict_proba"):
-                    oof[name][va] = m.predict_proba(Xva)[:, 1]
+                if m is None:
+                    continue
+                if name == "nhits":
+                    m.fit(
+                        Xtr, ytr,
+                        dates=dates_arr[tr], tickers=tickers_arr[tr],
+                        closes=closes_arr[tr], horizon_days=horizon_days,
+                    )
+                    oof[name][va] = m.predict_panel(
+                        dates=dates_arr[va], tickers=tickers_arr[va],
+                        closes=closes_arr[va],
+                    )
                 else:
-                    oof[name][va] = m.predict(Xva)
+                    m.fit(Xtr, ytr)
+                    if hasattr(m, "predict_proba"):
+                        oof[name][va] = m.predict_proba(Xva)[:, 1]
+                    else:
+                        oof[name][va] = m.predict(Xva)
             except Exception as e:  # noqa: BLE001
                 log.warning(f"fold {k} base {name} fit failed: {e}")
 
@@ -179,7 +223,16 @@ def fit_stack(
     for name, mk in base_specs.items():
         try:
             m = mk()
-            m.fit(X_filled.to_numpy(dtype=float), y)
+            if m is None:
+                continue
+            if name == "nhits":
+                m.fit(
+                    X_filled.to_numpy(dtype=float), y,
+                    dates=dates_arr, tickers=tickers_arr, closes=closes_arr,
+                    horizon_days=horizon_days,
+                )
+            else:
+                m.fit(X_filled.to_numpy(dtype=float), y)
             base_models[name] = m
         except Exception as e:  # noqa: BLE001
             log.warning(f"final fit base {name} failed: {e}")
