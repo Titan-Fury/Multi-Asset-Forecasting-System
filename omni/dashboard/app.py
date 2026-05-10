@@ -49,42 +49,149 @@ from omni.ondemand.universe import Resolution, resolve, suggestions
 
 
 def _theme_override(choice: str) -> None:
-    """Inject a small CSS override to force light or dark when user picks
-    a manual choice. The base CSS already handles 'auto'."""
-    if choice == "Dark":
-        st.markdown(
-            "<style>:root{color-scheme:dark} html{color-scheme:dark}</style>"
-            "<style>:root{"
-            "--bg-grad: radial-gradient(circle at 12% 0%, #082f49 0%, transparent 45%),"
-            "           radial-gradient(circle at 90% 100%, #2e1065 0%, transparent 50%),"
-            "           linear-gradient(180deg, #020617 0%, #0b1224 100%);"
-            "--glass-bg: rgba(15,23,42,0.55);"
-            "--glass-bg-strong: rgba(15,23,42,0.78);"
-            "--glass-border: rgba(148,163,184,0.18);"
-            "--glass-shadow: 0 8px 32px rgba(0,0,0,0.45);"
-            "--text-primary:#e2e8f0;--text-secondary:#94a3b8;--text-muted:#64748b;"
-            "--kpi-positive:#34d399;--kpi-negative:#f87171;"
-            "--regime-bull:#22c55e;--regime-chop:#eab308;--regime-bear:#ef4444;--regime-crisis:#a855f7;"
-            "}</style>",
-            unsafe_allow_html=True,
-        )
+    """Inject CSS variables to re-skin the page.
+
+    Phase 24.7 — overrides the new `--theme-c{1..4}`, `--theme-bg-stop{1..3}`,
+    `--theme-accent{,-2,-3}` vars used by the Phase 23.5 aurora mesh, so the
+    user's pick actually changes the visual theme end-to-end.
+    """
+    # Each theme is a tuple of CSS variable assignments
+    THEMES: dict[str, dict[str, str]] = {
+        # Default cosmic dark — keep as-is so "Auto" matches the baseline
+        "Auto": {},
+        # Pure dark — minimal aurora, near-black, cool blue accent
+        "Dark": {
+            "--theme-c1": "oklch(0.30 0.10 240 / 0.45)",
+            "--theme-c2": "oklch(0.30 0.10 220 / 0.35)",
+            "--theme-c3": "oklch(0.28 0.08 200 / 0.30)",
+            "--theme-c4": "oklch(0.30 0.08 260 / 0.25)",
+            "--theme-bg-stop1": "#020409",
+            "--theme-bg-stop2": "#04060d",
+            "--theme-bg-stop3": "#020409",
+            "--theme-accent": "#3b82f6",
+            "--theme-accent-2": "#06b6d4",
+            "--theme-accent-3": "#0ea5e9",
+            "color-scheme": "dark",
+        },
+        # Light — clean, nearly white, slate text
+        "Light": {
+            "--theme-c1": "oklch(0.95 0.05 240 / 0.55)",
+            "--theme-c2": "oklch(0.94 0.06 280 / 0.45)",
+            "--theme-c3": "oklch(0.96 0.04 200 / 0.40)",
+            "--theme-c4": "oklch(0.95 0.06 30 / 0.30)",
+            "--theme-bg-stop1": "#f8fafc",
+            "--theme-bg-stop2": "#eef2f7",
+            "--theme-bg-stop3": "#f1f5f9",
+            "--theme-accent": "#0284c7",
+            "--theme-accent-2": "#7c3aed",
+            "--theme-accent-3": "#0891b2",
+            "color-scheme": "light",
+        },
+        # Cyberpunk — hot magenta + neon cyan + acid yellow over near-black
+        "Cyberpunk": {
+            "--theme-c1": "oklch(0.55 0.30 340 / 0.70)",  # magenta/pink
+            "--theme-c2": "oklch(0.65 0.25 200 / 0.60)",  # neon cyan
+            "--theme-c3": "oklch(0.70 0.25 90 / 0.45)",   # acid yellow
+            "--theme-c4": "oklch(0.45 0.30 320 / 0.55)",  # deep magenta
+            "--theme-bg-stop1": "#0a0014",
+            "--theme-bg-stop2": "#10001f",
+            "--theme-bg-stop3": "#06000c",
+            "--theme-accent": "#ff2bd6",
+            "--theme-accent-2": "#00f0ff",
+            "--theme-accent-3": "#fff200",
+            "color-scheme": "dark",
+        },
+        # Synthwave — purple/pink/teal sunset, retro feel
+        "Synthwave": {
+            "--theme-c1": "oklch(0.50 0.25 320 / 0.65)",
+            "--theme-c2": "oklch(0.55 0.22 30 / 0.55)",
+            "--theme-c3": "oklch(0.55 0.20 200 / 0.45)",
+            "--theme-c4": "oklch(0.45 0.25 270 / 0.55)",
+            "--theme-bg-stop1": "#0d0524",
+            "--theme-bg-stop2": "#1a0a3a",
+            "--theme-bg-stop3": "#0a0420",
+            "--theme-accent": "#ff6ec7",
+            "--theme-accent-2": "#a855f7",
+            "--theme-accent-3": "#22d3ee",
+            "color-scheme": "dark",
+        },
+        # Matrix — pure green-on-black hacker terminal
+        "Matrix": {
+            "--theme-c1": "oklch(0.55 0.20 145 / 0.50)",
+            "--theme-c2": "oklch(0.50 0.22 140 / 0.40)",
+            "--theme-c3": "oklch(0.45 0.18 150 / 0.35)",
+            "--theme-c4": "oklch(0.50 0.20 130 / 0.30)",
+            "--theme-bg-stop1": "#000600",
+            "--theme-bg-stop2": "#020a02",
+            "--theme-bg-stop3": "#000400",
+            "--theme-accent": "#00ff9c",
+            "--theme-accent-2": "#22c55e",
+            "--theme-accent-3": "#84cc16",
+            "color-scheme": "dark",
+        },
+        # Nord — calm muted polar palette
+        "Nord": {
+            "--theme-c1": "oklch(0.50 0.10 240 / 0.50)",
+            "--theme-c2": "oklch(0.55 0.10 200 / 0.40)",
+            "--theme-c3": "oklch(0.50 0.08 220 / 0.35)",
+            "--theme-c4": "oklch(0.55 0.10 160 / 0.30)",
+            "--theme-bg-stop1": "#1a212c",
+            "--theme-bg-stop2": "#222933",
+            "--theme-bg-stop3": "#181d26",
+            "--theme-accent": "#88c0d0",
+            "--theme-accent-2": "#81a1c1",
+            "--theme-accent-3": "#a3be8c",
+            "color-scheme": "dark",
+        },
+    }
+
+    if choice not in THEMES or not THEMES[choice]:
+        return  # Auto / unknown — let base CSS rule
+
+    css_vars = "; ".join(f"{k}: {v}" for k, v in THEMES[choice].items())
+    # Inject with !important so the user choice beats the @property defaults.
+    extras = ""
+    if choice == "Cyberpunk":
+        # Cyberpunk needs extra punch: glow on text, cyan/magenta KPI delta chips
+        extras = """
+        [data-testid="stMetric"] [data-testid="stMetricValue"] {
+          color: #ff2bd6 !important;
+          text-shadow: 0 0 18px rgba(255, 43, 214, 0.55), 0 0 36px rgba(0, 240, 255, 0.25);
+        }
+        h1, h2, h3 {
+          text-shadow: 0 0 16px rgba(255, 43, 214, 0.35);
+        }
+        .ultra-marquee__track > b.up { color: #00f0ff !important;
+          text-shadow: 0 0 12px rgba(0, 240, 255, 0.6); }
+        .ultra-marquee__track > b.dn { color: #ff2bd6 !important;
+          text-shadow: 0 0 12px rgba(255, 43, 214, 0.6); }
+        """
+    elif choice == "Matrix":
+        extras = """
+        body, .stApp, [data-testid="stMetric"] [data-testid="stMetricValue"],
+        h1, h2, h3, p, span, div {
+          font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+        }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] {
+          color: #00ff9c !important;
+          text-shadow: 0 0 14px rgba(0, 255, 156, 0.6);
+        }
+        """
     elif choice == "Light":
-        st.markdown(
-            "<style>:root{color-scheme:light} html{color-scheme:light}</style>"
-            "<style>:root{"
-            "--bg-grad: radial-gradient(circle at 15% 0%, #e0f2fe 0%, transparent 45%),"
-            "           radial-gradient(circle at 85% 90%, #ede9fe 0%, transparent 45%),"
-            "           linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);"
-            "--glass-bg: rgba(255,255,255,0.55);"
-            "--glass-bg-strong: rgba(255,255,255,0.72);"
-            "--glass-border: rgba(255,255,255,0.7);"
-            "--glass-shadow: 0 8px 32px rgba(15,23,42,0.08);"
-            "--text-primary:#0f172a;--text-secondary:#475569;--text-muted:#64748b;"
-            "--kpi-positive:#059669;--kpi-negative:#dc2626;"
-            "--regime-bull:#16a34a;--regime-chop:#ca8a04;--regime-bear:#dc2626;--regime-crisis:#7c3aed;"
-            "}</style>",
-            unsafe_allow_html=True,
-        )
+        extras = """
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #0f172a !important; text-shadow: none; }
+        [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: rgba(15,23,42,0.6) !important; }
+        [data-testid="stMetric"] {
+          background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(248,250,252,0.95)) !important;
+          border-color: rgba(15,23,42,0.10) !important;
+        }
+        body, .stApp { color: #0f172a; }
+        """
+
+    st.markdown(
+        f"<style>:root {{ {css_vars} }} {extras}</style>",
+        unsafe_allow_html=True,
+    )
 
 
 def _suggest_options(query: str) -> list[str]:
@@ -392,9 +499,13 @@ def _render_portfolio_tab() -> None:
     def _score_one(tk: str, ac: str, dn: str) -> dict | None:
         try:
             card = predict_ticker(tk, ac)
+            if card is None:
+                return {"_err": f"{tk}: no prediction available "
+                                f"(ticker may be delisted/illiquid or has "
+                                f"<60d of price history)"}
             cd = card.to_dict()
         except Exception as e:  # noqa: BLE001
-            return {"_err": f"{tk}: {e}"}
+            return {"_err": f"{tk}: {type(e).__name__}: {e}"}
         kr = kelly_from_card(cd)
         return {
             "ticker": tk,
@@ -1158,9 +1269,19 @@ def main() -> None:
         )
         st.divider()
 
-        theme_choice = st.radio(
-            "Theme", ["Auto", "Light", "Dark"], horizontal=True,
-            help="Auto follows your OS preference.",
+        theme_choice = st.selectbox(
+            "Theme",
+            ["Auto", "Dark", "Light", "Cyberpunk", "Synthwave", "Matrix", "Nord"],
+            index=0,
+            help=(
+                "**Auto** — default cosmic dark · "
+                "**Dark** — minimal near-black · "
+                "**Light** — clean slate · "
+                "**Cyberpunk** — neon magenta + cyan · "
+                "**Synthwave** — purple/pink retro sunset · "
+                "**Matrix** — green-on-black hacker · "
+                "**Nord** — calm muted polar"
+            ),
         )
         _theme_override(theme_choice)
 

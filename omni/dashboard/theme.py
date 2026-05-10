@@ -1322,20 +1322,37 @@ _ULTRA_FX_SVG_DEFS = """
 
 _ULTRA_FX_CSS = """
 <style>
-/* A. Aurora mesh background */
+/* A. Aurora mesh background (Phase 24.7 — driven by --theme-c{1-4} vars
+   so the user's Theme picker actually re-skins the page) */
 @property --aurora-1 { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
 @property --aurora-2 { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+:root {
+  /* Default = "Auto / Cosmos" — overridden by app.py _theme_override */
+  --theme-c1: oklch(0.42 0.16 260 / 0.55);
+  --theme-c2: oklch(0.45 0.18 310 / 0.45);
+  --theme-c3: oklch(0.40 0.14 180 / 0.40);
+  --theme-c4: oklch(0.44 0.20 25 / 0.30);
+  --theme-bg-stop1: #07090f;
+  --theme-bg-stop2: #0a0d18;
+  --theme-bg-stop3: #06070c;
+  --theme-accent: #38bdf8;
+  --theme-accent-2: #a855f7;
+  --theme-accent-3: #22d3ee;
+}
 html, body, .stApp, [data-testid="stAppViewContainer"] {
   background:
     radial-gradient(at calc(20% + var(--aurora-1)) 12%,
-      oklch(0.42 0.16 260 / 0.55) 0%, transparent 55%),
+      var(--theme-c1) 0%, transparent 55%),
     radial-gradient(at calc(80% - var(--aurora-2)) 18%,
-      oklch(0.45 0.18 310 / 0.45) 0%, transparent 55%),
+      var(--theme-c2) 0%, transparent 55%),
     radial-gradient(at 65% calc(85% - var(--aurora-1)),
-      oklch(0.40 0.14 180 / 0.40) 0%, transparent 55%),
+      var(--theme-c3) 0%, transparent 55%),
     radial-gradient(at 12% calc(78% + var(--aurora-2)),
-      oklch(0.44 0.20 25 / 0.30) 0%, transparent 60%),
-    linear-gradient(180deg, #07090f 0%, #0a0d18 50%, #06070c 100%) !important;
+      var(--theme-c4) 0%, transparent 60%),
+    linear-gradient(180deg,
+      var(--theme-bg-stop1) 0%,
+      var(--theme-bg-stop2) 50%,
+      var(--theme-bg-stop3) 100%) !important;
   background-attachment: fixed !important;
   animation: ultra-aurora 22s ease-in-out infinite alternate;
 }
