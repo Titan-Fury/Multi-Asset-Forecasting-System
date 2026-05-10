@@ -157,6 +157,59 @@ _ALIAS_RAW: tuple[tuple[str, str, str, str], ...] = (
     ("SUZLON", "SUZLON", "india", "Suzlon Energy"),
     ("TATA POWER", "TATAPOWER", "india", "Tata Power"),
     ("TATA CONSUMER", "TATACONSUM", "india", "Tata Consumer"),
+
+    # ============================================================
+    # INDEX / BENCHMARK ALIASES (Phase 24.5)
+    # ----------------------------------------------------------------
+    # Pure indices (^NSEI etc.) have no fundamentals so the prediction
+    # pipeline fails. We route the common index queries to their most
+    # liquid TRADEABLE ETF proxy so a user typing "NIFTY 50" gets a
+    # real, predictable security back.
+    # ============================================================
+    ("NIFTY 50",     "NIFTYBEES",  "india", "Nippon India ETF Nifty BeES (NIFTY 50 proxy)"),
+    ("NIFTY",        "NIFTYBEES",  "india", "Nippon India ETF Nifty BeES (NIFTY 50 proxy)"),
+    ("NIFTY50",      "NIFTYBEES",  "india", "Nippon India ETF Nifty BeES (NIFTY 50 proxy)"),
+    ("NIFTYBEES",    "NIFTYBEES",  "india", "Nippon India ETF Nifty BeES (NIFTY 50 proxy)"),
+    ("NIFTY ETF",    "NIFTYBEES",  "india", "Nippon India ETF Nifty BeES (NIFTY 50 proxy)"),
+
+    ("BANKNIFTY",    "BANKBEES",   "india", "Nippon India ETF Bank BeES (BANKNIFTY proxy)"),
+    ("BANK NIFTY",   "BANKBEES",   "india", "Nippon India ETF Bank BeES (BANKNIFTY proxy)"),
+    ("BANKBEES",     "BANKBEES",   "india", "Nippon India ETF Bank BeES (BANKNIFTY proxy)"),
+
+    ("SENSEX",       "SETFNN50",   "india", "SBI ETF Nifty Next 50 (SENSEX-correlated proxy)"),
+    ("BSE SENSEX",   "SETFNN50",   "india", "SBI ETF Nifty Next 50 (SENSEX-correlated proxy)"),
+
+    ("GOLD",         "GOLDBEES",   "india", "Nippon India ETF Gold BeES (gold proxy)"),
+    ("GOLDBEES",     "GOLDBEES",   "india", "Nippon India ETF Gold BeES"),
+    ("XAU",          "GOLDBEES",   "india", "Gold (via GOLDBEES ETF)"),
+
+    # US benchmark ETFs
+    ("S&P 500",      "SPY",        "us",    "SPDR S&P 500 ETF Trust"),
+    ("SP500",        "SPY",        "us",    "SPDR S&P 500 ETF Trust"),
+    ("SPX",          "SPY",        "us",    "SPDR S&P 500 ETF Trust"),
+    ("NASDAQ",       "QQQ",        "us",    "Invesco QQQ Trust (NASDAQ-100)"),
+    ("NASDAQ 100",   "QQQ",        "us",    "Invesco QQQ Trust (NASDAQ-100)"),
+    ("DOW",          "DIA",        "us",    "SPDR Dow Jones Industrial Average ETF"),
+    ("DOW JONES",    "DIA",        "us",    "SPDR Dow Jones Industrial Average ETF"),
+    ("RUSSELL",      "IWM",        "us",    "iShares Russell 2000 ETF"),
+    ("RUSSELL 2000", "IWM",        "us",    "iShares Russell 2000 ETF"),
+    ("VIX",          "VIXY",       "us",    "ProShares VIX Short-Term Futures ETF"),
+
+    # Crypto: full forms users type
+    ("BITCOIN",      "BTC-USD",    "crypto", "Bitcoin"),
+    ("BTC",          "BTC-USD",    "crypto", "Bitcoin"),
+    ("ETHEREUM",     "ETH-USD",    "crypto", "Ethereum"),
+    ("ETH",          "ETH-USD",    "crypto", "Ethereum"),
+    ("SOLANA",       "SOL-USD",    "crypto", "Solana"),
+    ("SOL",          "SOL-USD",    "crypto", "Solana"),
+    ("DOGECOIN",     "DOGE-USD",   "crypto", "Dogecoin"),
+    ("DOGE",         "DOGE-USD",   "crypto", "Dogecoin"),
+
+    # FX
+    ("USDINR",       "INR=X",      "us",    "USD/INR (yfinance INR=X)"),
+    ("USD INR",      "INR=X",      "us",    "USD/INR"),
+    ("EURUSD",       "EURUSD=X",   "us",    "EUR/USD"),
+    ("GBPUSD",       "GBPUSD=X",   "us",    "GBP/USD"),
 )
 
 

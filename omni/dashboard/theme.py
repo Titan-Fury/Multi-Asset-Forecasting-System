@@ -2004,6 +2004,122 @@ section[data-testid="stSidebar"] textarea {
   font-weight: 500;
 }
 
+/* ==== Phase 24.5 — MODERN SLIDING SIDEBAR =================================
+   Replaces the boring default Streamlit sidebar with a premium fly-in panel.
+   Smooth spring transitions, custom toggle pill in top-left, frosted glass.
+   The transition timing matches Linear / Notion sidebar feel.
+   =========================================================================== */
+
+/* Smooth sidebar slide-in: override Streamlit's sharp toggle */
+section[data-testid="stSidebar"] {
+  transition:
+    transform 480ms cubic-bezier(0.16, 1, 0.3, 1),
+    margin-left 480ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 480ms cubic-bezier(0.16, 1, 0.3, 1),
+    min-width 480ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  will-change: transform, width;
+}
+
+/* Sidebar collapse button: elevate from a thin chevron to a real pill */
+button[data-testid="stSidebarCollapseButton"],
+button[data-testid="stSidebarCollapsedControl"] button,
+[data-testid="collapsedControl"] button {
+  position: relative !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg,
+    color-mix(in oklch, #38bdf8 22%, transparent),
+    color-mix(in oklch, #a855f7 22%, transparent)) !important;
+  border: 1px solid color-mix(in oklch, #38bdf8 35%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 24px -8px color-mix(in oklch, #38bdf8 50%, transparent),
+    0 0 24px -8px color-mix(in oklch, #a855f7 40%, transparent);
+  transition: all 320ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  cursor: pointer !important;
+}
+button[data-testid="stSidebarCollapseButton"]:hover,
+button[data-testid="stSidebarCollapsedControl"] button:hover,
+[data-testid="collapsedControl"] button:hover {
+  transform: scale(1.08) translateY(-1px);
+  border-color: color-mix(in oklch, #38bdf8 80%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 12px 32px -8px color-mix(in oklch, #38bdf8 70%, transparent),
+    0 0 32px -4px color-mix(in oklch, #a855f7 60%, transparent);
+}
+
+/* Style the chevron icons inside the toggle */
+button[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="collapsedControl"] svg {
+  fill: #f8fafc !important;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.5));
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* When sidebar is COLLAPSED, the show-button floats top-left */
+[data-testid="collapsedControl"] {
+  position: fixed !important;
+  top: 50px !important;     /* below 36px marquee + 14px padding */
+  left: 14px !important;
+  z-index: 1003 !important;
+  animation: ultra-pulse-toggle 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes ultra-pulse-toggle {
+  0%, 100% { box-shadow: 0 8px 24px -8px rgba(56, 189, 248, 0.5),
+                         0 0 0 0   rgba(56, 189, 248, 0); }
+  50%      { box-shadow: 0 8px 24px -8px rgba(56, 189, 248, 0.5),
+                         0 0 0 8px rgba(56, 189, 248, 0.18); }
+}
+
+/* When sidebar is OPEN, the close button sits cleanly inside the panel */
+button[data-testid="stSidebarCollapseButton"] {
+  position: absolute !important;
+  top: 14px !important;
+  right: 14px !important;
+  z-index: 100 !important;
+}
+
+/* Add a subtle backdrop blur effect to the main content when sidebar opens */
+section[data-testid="stSidebar"][aria-expanded="true"] ~ section.main {
+  transition: filter 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Sidebar inner content: add stagger animation on open */
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > * {
+  animation: sidebar-stagger-in 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(1) { animation-delay: 60ms; }
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(2) { animation-delay: 100ms; }
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(3) { animation-delay: 140ms; }
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(4) { animation-delay: 180ms; }
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(5) { animation-delay: 220ms; }
+section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(n+6) { animation-delay: 260ms; }
+@keyframes sidebar-stagger-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Floating thin accent line on the inner edge of the sidebar */
+section[data-testid="stSidebar"]::after {
+  content: "";
+  position: absolute;
+  top: 60px; bottom: 60px; right: 0;
+  width: 2px;
+  background: linear-gradient(180deg,
+    transparent,
+    color-mix(in oklch, #38bdf8 60%, transparent) 25%,
+    color-mix(in oklch, #a855f7 60%, transparent) 75%,
+    transparent);
+  opacity: 0.45;
+  filter: blur(0.5px);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   html, body, .stApp, [data-testid="stAppViewContainer"] { animation: none !important; }

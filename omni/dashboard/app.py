@@ -966,9 +966,45 @@ def main() -> None:
         last_run = (regime["date"].max()
                     if regime is not None and not regime.empty and "date" in regime.columns
                     else None)
-        st.caption(
-            f"Last regime point: **{last_run.date() if last_run is not None else 'n/a'}**\n\n"
-            f"Loaded at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+        # Phase 24.5 — staleness indicator (warn if the regime model is >7d old)
+        if last_run is not None:
+            try:
+                from datetime import datetime as _dt
+                age_days = (_dt.now(timezone.utc).date() - last_run.date()).days
+            except Exception:
+                age_days = 0
+            if age_days > 30:
+                stale_chip = (f"<span style='color:#f87171;font-weight:700;"
+                              f"background:rgba(248,113,113,0.12);padding:2px 8px;"
+                              f"border-radius:6px;font-size:10px;letter-spacing:0.05em;"
+                              f"text-transform:uppercase;margin-left:6px;'>"
+                              f"stale · {age_days}d</span>")
+            elif age_days > 7:
+                stale_chip = (f"<span style='color:#fbbf24;font-weight:700;"
+                              f"background:rgba(251,191,36,0.12);padding:2px 8px;"
+                              f"border-radius:6px;font-size:10px;letter-spacing:0.05em;"
+                              f"text-transform:uppercase;margin-left:6px;'>"
+                              f"{age_days}d old</span>")
+            else:
+                stale_chip = (f"<span style='color:#4ade80;font-weight:700;"
+                              f"background:rgba(74,222,128,0.12);padding:2px 8px;"
+                              f"border-radius:6px;font-size:10px;letter-spacing:0.05em;"
+                              f"text-transform:uppercase;margin-left:6px;'>"
+                              f"fresh</span>")
+            date_str = last_run.date().isoformat()
+        else:
+            stale_chip = ""
+            date_str = "n/a"
+        st.markdown(
+            f"<div style='font-size:11px;color:rgba(148,163,184,0.7);"
+            f"letter-spacing:0.04em;'>Last regime point</div>"
+            f"<div style='font-size:13px;font-weight:600;color:#e2e8f0;"
+            f"font-family:JetBrains Mono,monospace;margin-top:2px;'>"
+            f"{date_str}{stale_chip}</div>"
+            f"<div style='font-size:10px;color:rgba(148,163,184,0.5);"
+            f"margin-top:8px;letter-spacing:0.04em;'>"
+            f"Loaded {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</div>",
+            unsafe_allow_html=True,
         )
 
     # ---- in-memory filter
