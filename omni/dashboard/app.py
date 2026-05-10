@@ -898,6 +898,15 @@ def main() -> None:
     )
     inject_theme()
 
+    # Phase 24.2 — live market data marquee at the very top.
+    # Cached for 5 minutes via st.cache_data inside the module; falls back
+    # gracefully to "—" tiles if yfinance is unreachable.
+    try:
+        from omni.dashboard.marquee import render_marquee
+        render_marquee(height_px=36)
+    except Exception:  # noqa: BLE001
+        pass
+
     # ---- sidebar
     with st.sidebar:
         st.markdown(

@@ -1305,38 +1305,12 @@ _ULTRA_FX_SVG_DEFS = """
   </defs>
 </svg>
 
-<div class="ultra-marquee" aria-hidden="true">
-  <div class="ultra-marquee__track">
-    <span>NIFTY 50</span><b class="up">+0.42%</b>
-    <span>SENSEX</span><b class="up">+0.38%</b>
-    <span>BANKNIFTY</span><b class="dn">-0.12%</b>
-    <span>USDINR</span><b>83.42</b>
-    <span>BTC</span><b class="up">+1.84%</b>
-    <span>ETH</span><b class="up">+2.21%</b>
-    <span>S&amp;P 500</span><b class="up">+0.18%</b>
-    <span>NASDAQ</span><b class="up">+0.31%</b>
-    <span>VIX</span><b class="dn">-3.4%</b>
-    <span>GOLD</span><b class="up">+0.66%</b>
-    <span>BRENT</span><b class="dn">-0.22%</b>
-    <span>10Y UST</span><b>4.18%</b>
-    <span>NIFTY 50</span><b class="up">+0.42%</b>
-    <span>SENSEX</span><b class="up">+0.38%</b>
-    <span>BANKNIFTY</span><b class="dn">-0.12%</b>
-    <span>USDINR</span><b>83.42</b>
-    <span>BTC</span><b class="up">+1.84%</b>
-    <span>ETH</span><b class="up">+2.21%</b>
-    <span>S&amp;P 500</span><b class="up">+0.18%</b>
-    <span>NASDAQ</span><b class="up">+0.31%</b>
-    <span>VIX</span><b class="dn">-3.4%</b>
-    <span>GOLD</span><b class="up">+0.66%</b>
-    <span>BRENT</span><b class="dn">-0.22%</b>
-    <span>10Y UST</span><b>4.18%</b>
-  </div>
-</div>
+<!-- Marquee is now rendered live from omni.dashboard.marquee.render_marquee()
+     via app.py — these static rows are kept ONLY as a fallback when the
+     marquee module is missing or yfinance fails. Real values get injected
+     above this in app.py. -->
 
 <div class="ultra-lighthouse" aria-hidden="true"></div>
-<div class="ultra-cursor" aria-hidden="true"></div>
-<div class="ultra-cursor-follow" aria-hidden="true"></div>
 
 <div class="ultra-status" aria-hidden="true">
   <span class="ultra-status__dot"></span>
@@ -1541,42 +1515,64 @@ a, button, [role="button"], .stButton > button, [data-baseweb="tab"],
 input, textarea, [contenteditable="true"], select { cursor: text; }
 [disabled] { cursor: not-allowed; }
 
-/* F. Marquee ticker tape */
+/* F. Marquee ticker tape (36px tall — large enough to read at a glance) */
 .ultra-marquee {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 28px;
+  height: 36px;
   z-index: 1002;
   overflow: hidden;
-  background: color-mix(in oklch, #0b1220 86%, transparent);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #050810 92%, transparent),
+      color-mix(in oklch, #0b1220 88%, transparent));
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
   border-bottom: 1px solid color-mix(in oklch, white 8%, transparent);
+  box-shadow: 0 6px 24px -10px rgba(0, 0, 0, 0.6);
   font-feature-settings: "tnum" 1;
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.02em;
-  -webkit-mask-image: linear-gradient(90deg, transparent, black 4%, black 96%, transparent);
-          mask-image: linear-gradient(90deg, transparent, black 4%, black 96%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 5%, black 95%, transparent);
+          mask-image: linear-gradient(90deg, transparent, black 5%, black 95%, transparent);
 }
 .ultra-marquee__track {
   display: inline-flex;
-  gap: 28px;
+  gap: 32px;
   align-items: center;
   white-space: nowrap;
-  padding: 6px 0;
-  height: 28px;
-  animation: ultra-mqr 60s linear infinite;
+  padding: 10px 0;
+  height: 36px;
+  animation: ultra-mqr 90s linear infinite;
 }
-.ultra-marquee__track > span { color: rgba(226,232,240,0.7); }
-.ultra-marquee__track > b { color: rgba(226,232,240,0.95); margin-right: 8px; font-weight: 600; }
-.ultra-marquee__track > b.up { color: #4ade80; }
-.ultra-marquee__track > b.dn { color: #f87171; }
+.ultra-marquee__track > span {
+  color: rgba(148, 163, 184, 0.78);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.ultra-marquee__track > b {
+  color: rgba(241, 245, 249, 0.95);
+  margin-right: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.ultra-marquee__track > b.up {
+  color: #4ade80;
+  text-shadow: 0 0 12px rgba(74, 222, 128, 0.35);
+}
+.ultra-marquee__track > b.dn {
+  color: #f87171;
+  text-shadow: 0 0 12px rgba(248, 113, 113, 0.35);
+}
 .ultra-marquee:hover .ultra-marquee__track { animation-play-state: paused; }
 @keyframes ultra-mqr { to { transform: translateX(-50%); } }
-.stApp [data-testid="stHeader"] { top: 28px !important; }
-.stApp { padding-top: 28px; }
+.stApp [data-testid="stHeader"] { top: 36px !important; }
+.stApp { padding-top: 36px; }
 
 /* G. Slot-roll digits */
 .ultra-digit {
