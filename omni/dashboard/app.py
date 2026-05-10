@@ -654,6 +654,245 @@ def _render_earnings_tab() -> None:
                           f"{avg:+.2f} %" if pd.notna(avg) else "—")
 
 
+def _render_dev_tab() -> None:
+    """Developer admin panel — manual triggers for the maintenance jobs that
+    normally run via cron / orchestrator. Useful for one-off refreshes.
+
+    All actions are isolated and idempotent. Long-running jobs (model retrain)
+    show a spinner; short ones return immediately. Cache stats are read live.
+    """
+    import os
+    import subprocess
+    import time as _time
+    from pathlib import Path
+
+    st.markdown(
+        "<div style='font-family:Inter,sans-serif;'>"
+        "<div style='font-size:1.4rem;font-weight:800;background:var(--accent-glow);"
+        "-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>Developer Console</div>"
+        "<div style='color:var(--text-muted);font-size:0.85rem;'>"
+        "Manual maintenance triggers. These actions modify on-disk state. Use with care.</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+    # --------- Cache stats ---------
+    st.markdown("### Cache")
+    try:
+        from omni.ondemand.cache import get_cache, invalidate
+        cache = get_cache()
+        n_entries = len(cache)
+        size_mb = cache.volume() / (1024 * 1024)
+    except Exception as exc:  # noqa: BLE001
+        n_entries = 0
+        size_mb = 0.0
+        st.caption(f"cache unavailable: {exc}")
+
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("Cache entries", f"{n_entries:,}")
+    with cols[1]:
+        st.metric("Cache size", f"{size_mb:.1f} MB")
+    with cols[2]:
+        if st.button("🗑 Clear prediction cache", width='stretch',
+                     help="Drops every cached PredictionCard and bench card. "
+                          "Next predict_ticker() call will rebuild from live APIs."):
+            n1 = invalidate("predict_card:")
+            n2 = invalidate("deep_card:")
+            n3 = invalidate("bench_card:")
+            st.success(f"cleared {n1 + n2 + n3} cached prediction entries")
+    with cols[3]:
+        if st.button("🗑 Clear ALL caches", width='stretch',
+                     help="Nuclear option — drops everything. "
+                          "Next page load will re-fetch prices, news, fundamentals, macros."):
+            cache.clear()
+            st.success(f"cleared all {n_entries:,} cache entries")
+
+    st.divider()
+
+    # --------- Models ---------
+    st.markdown("### Models")
+    model_dir = Path("data/models")
+    artifacts = []
+    if model_dir.exists():
+        for f in sorted(model_dir.glob("*.joblib")) + sorted(model_dir.glob("*.pkl")):
+            try:
+                mtime = _time.ctime(f.stat().st_mtime)
+                size_mb = f.stat().st_size / (1024 * 1024)
+                artifacts.append({"file": f.name, "size_MB": round(size_mb, 2),
+                                  "modified": mtime})
+            except Exception:
+                pass
+    if artifacts:
+        import pandas as pd
+        st.dataframe(pd.DataFrame(artifacts), width='stretch', hide_index=True)
+    else:
+        st.caption("no model artifacts found in data/models/")
+
+    cols = st.columns(3)
+    with cols[0]:
+        if st.button("🔁 Refit regime (HMM)", width='stretch',
+                     help="Re-run scripts/refit_regime.py — pulls latest macro data "
+                          "and refits the 4-state HMM. Updates 'Last regime point'."):
+            with st.spinner("running refit_regime…"):
+                try:
+                    rc = subprocess.run(
+                        [".venv\\Scripts\\python.exe", "scripts\\retrain_all.py", "--regime-only"],
+                        capture_output=True, text=True, timeout=300,
+                    )
+                    if rc.returncode == 0:
+                        st.success("regime refit done")
+                    else:
+                        st.error(f"failed: {rc.stderr[-500:]}")
+                except subprocess.TimeoutExpired:
+                    st.error("refit timed out (300s)")
+                except FileNotFoundError:
+                    st.warning("scripts/retrain_all.py --regime-only not wired; "
+                                "run manually: python scripts/refit_regime.py")
+    with cols[1]:
+        if st.button("🔁 Retrain universal", width='stretch',
+                     help="Walk-forward retrain of XGB+isotonic for h=1/5/21. "
+                          "Takes 30-90s on GPU."):
+            with st.spinner("retraining universal…"):
+                try:
+                    env = os.environ.copy()
+                    env["OMNI_XGB_DEVICE"] = "cuda"
+                    rc = subprocess.run(
+                        [".venv\\Scripts\\python.exe", "scripts\\train_universal_model.py",
+                         "--horizons", "1,5,21", "--force"],
+                        capture_output=True, text=True, timeout=600, env=env,
+                    )
+                    if rc.returncode == 0:
+                        st.success("universal retrain done")
+                        st.code(rc.stdout[-1000:])
+                    else:
+                        st.error(f"failed: {rc.stderr[-500:]}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"retrain error: {exc}")
+    with cols[2]:
+        if st.button("🔁 Retrain stack ensemble", width='stretch',
+                     help="Stack retrain h=5 with XGB+HGB+LGB+NHITS bases. "
+                          "Takes 5-15 min on GPU."):
+            with st.spinner("retraining stack…"):
+                try:
+                    env = os.environ.copy()
+                    env["OMNI_XGB_DEVICE"] = "cuda"
+                    env["OMNI_LGB_DEVICE"] = "cuda"
+                    env["OMNI_NHITS_DEVICE"] = "cuda"
+                    rc = subprocess.run(
+                        [".venv\\Scripts\\python.exe", "scripts\\train_universal_model.py",
+                         "--horizons", "5", "--ensemble", "stack", "--force"],
+                        capture_output=True, text=True, timeout=1800, env=env,
+                    )
+                    if rc.returncode == 0:
+                        st.success("stack retrain done")
+                        st.code(rc.stdout[-1000:])
+                    else:
+                        st.error(f"failed: {rc.stderr[-500:]}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"retrain error: {exc}")
+
+    st.divider()
+
+    # --------- Data lake ---------
+    st.markdown("### Data Lake")
+    lake_root = Path("data/lake")
+    lake_stats = {}
+    try:
+        prices_dir = lake_root / "prices"
+        if prices_dir.exists():
+            for ac_dir in prices_dir.iterdir():
+                if ac_dir.is_dir():
+                    lake_stats[f"prices/{ac_dir.name}"] = len(list(ac_dir.glob("*.parquet")))
+        ts = lake_root / "training" / "training_set.parquet"
+        if ts.exists():
+            import pandas as pd
+            df = pd.read_parquet(ts)
+            lake_stats["training_set rows"] = len(df)
+            lake_stats["training_set cols"] = len(df.columns)
+            lake_stats["training_set tickers"] = df["ticker"].nunique() if "ticker" in df.columns else 0
+            lake_stats["training_set range"] = f"{df['date'].min().date()} → {df['date'].max().date()}"
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"lake stats unavailable: {exc}")
+
+    if lake_stats:
+        st.json(lake_stats)
+
+    cols = st.columns(3)
+    with cols[0]:
+        if st.button("🌐 Refresh marquee", width='stretch',
+                     help="Force a fresh yfinance fetch for the top ticker tape."):
+            try:
+                from omni.dashboard.marquee import fetch_marquee_data
+                fetch_marquee_data.clear()         # st.cache_data.clear()
+                items = fetch_marquee_data()
+                up = sum(1 for i in items if i.direction > 0)
+                dn = sum(1 for i in items if i.direction < 0)
+                st.success(f"refreshed {len(items)} tickers · ▲{up} ▼{dn}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"refresh failed: {exc}")
+    with cols[1]:
+        if st.button("📊 Run SBI benchmark", width='stretch',
+                     help="Sanity check: predict SBIN.NS end-to-end and compare "
+                          "live vs offline path (parity test)."):
+            with st.spinner("running benchmark_sbi.py…"):
+                try:
+                    rc = subprocess.run(
+                        [".venv\\Scripts\\python.exe", "scripts\\benchmark_sbi.py"],
+                        capture_output=True, text=True, timeout=180,
+                    )
+                    st.code((rc.stdout + "\n" + rc.stderr)[-2500:], language="text")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"benchmark error: {exc}")
+    with cols[2]:
+        if st.button("🧹 Rebuild training set", width='stretch',
+                     help="Re-run scripts/build_training_set.py — pulls all "
+                          "tickers from lake and rebuilds the pooled training "
+                          "frame. ~10-20 min."):
+            with st.spinner("rebuilding training set… (~15 min)"):
+                try:
+                    rc = subprocess.run(
+                        [".venv\\Scripts\\python.exe", "scripts\\build_training_set.py",
+                         "--no-news", "--asset-classes", "us,india,crypto"],
+                        capture_output=True, text=True, timeout=1800,
+                    )
+                    if rc.returncode == 0:
+                        st.success("training set rebuilt")
+                        st.code(rc.stdout[-1000:])
+                    else:
+                        st.error(f"failed: {rc.stderr[-500:]}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"build error: {exc}")
+
+    st.divider()
+
+    # --------- Environment / version info ---------
+    st.markdown("### Environment")
+    try:
+        import sys as _sys
+        env_info = {
+            "python": _sys.version.split()[0],
+        }
+        for pkg in ("xgboost", "lightgbm", "sklearn", "torch", "neuralforecast", "streamlit"):
+            try:
+                mod = __import__(pkg)
+                env_info[pkg] = getattr(mod, "__version__", "?")
+            except Exception:
+                env_info[pkg] = "(not installed)"
+        # GPU check
+        try:
+            import torch as _t
+            env_info["cuda_available"] = _t.cuda.is_available()
+            if _t.cuda.is_available():
+                env_info["cuda_device"] = _t.cuda.get_device_name(0)
+        except Exception:
+            pass
+        st.json(env_info)
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"env info unavailable: {exc}")
+
+
 def _render_predict_tab() -> None:
     """On-demand single-ticker prediction tab.
 
@@ -1038,10 +1277,10 @@ def main() -> None:
     # ---- 3. tabs
     (tab_predict, tab_watch, tab_portfolio, tab_movers, tab_heat,
      tab_signals, tab_cosmos, tab_corr, tab_calib, tab_earnings,
-     tab_history) = st.tabs([
+     tab_history, tab_dev) = st.tabs([
         "Predict", "★ Watchlist", "Portfolio", "Top movers",
         "Watchlist heatmap", "Top signals", "Cosmos 3D", "Correlations",
-        "Calibration", "Earnings", "History",
+        "Calibration", "Earnings", "History", "🛠 Dev",
     ])
 
     with tab_predict:
@@ -1128,6 +1367,9 @@ def main() -> None:
         _u.signal_history_table(signals, max_rows=300)
         st.divider()
         _render_replay_section()
+
+    with tab_dev:
+        _render_dev_tab()
 
     st.markdown(
         "<div style='text-align:center;color:var(--text-muted);font-size:0.78rem;"

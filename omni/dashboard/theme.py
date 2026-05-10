@@ -2088,20 +2088,12 @@ section[data-testid="stSidebar"][aria-expanded="true"] ~ section.main {
   transition: filter 480ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Sidebar inner content: add stagger animation on open */
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > * {
-  animation: sidebar-stagger-in 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(1) { animation-delay: 60ms; }
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(2) { animation-delay: 100ms; }
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(3) { animation-delay: 140ms; }
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(4) { animation-delay: 180ms; }
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(5) { animation-delay: 220ms; }
-section[data-testid="stSidebar"][aria-expanded="true"] > div > div > *:nth-child(n+6) { animation-delay: 260ms; }
-@keyframes sidebar-stagger-in {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
+/* Sidebar inner content: NO stagger animation.
+   Phase 24.5 had a translateX(-12px) staged-in animation that re-fired on
+   every Streamlit rerun, leaving the children stuck at translateX(-12px)
+   for ~520ms each time and clipping the leftmost ~12px of every label
+   ("MNI_STOCKS" instead of "OMNI_STOCKS"). Removed entirely — the smooth
+   slide-in of the whole sidebar is enough motion. */
 
 /* Floating thin accent line on the inner edge of the sidebar */
 section[data-testid="stSidebar"]::after {
