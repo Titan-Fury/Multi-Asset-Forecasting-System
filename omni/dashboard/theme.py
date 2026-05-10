@@ -1390,7 +1390,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 /* C. Goo filter on orbs (opt-in via body.fx-goo) */
 body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
 
-/* D. Iridescent KPI tiles */
+/* D. Iridescent KPI tiles (subtle — must NOT cover the numbers) */
 [data-testid="stMetric"]::after {
   content: "";
   position: absolute;
@@ -1400,61 +1400,102 @@ body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
   background: conic-gradient(
     from calc(var(--mx, 50) * 1deg) at var(--mx, 50%) var(--my, 50%),
     transparent 0deg,
-    color-mix(in oklch, #22d3ee 18%, transparent) 60deg,
-    color-mix(in oklch, #a855f7 22%, transparent) 180deg,
-    color-mix(in oklch, #f472b6 18%, transparent) 270deg,
+    color-mix(in oklch, #22d3ee 12%, transparent) 60deg,
+    color-mix(in oklch, #a855f7 14%, transparent) 180deg,
+    color-mix(in oklch, #f472b6 12%, transparent) 270deg,
     transparent 360deg
   );
   opacity: 0;
-  mix-blend-mode: overlay;
+  mix-blend-mode: soft-light;
   transition: opacity 320ms var(--ease-out-expo);
-  z-index: 2;
+  z-index: 0;        /* BEHIND the value, not on top */
 }
-[data-testid="stMetric"]:hover::after { opacity: 0.55; }
+[data-testid="stMetric"]:hover::after { opacity: 0.35; }
+[data-testid="stMetric"] > * { position: relative; z-index: 1; }
 
 [data-testid="stMetric"] [data-testid="stMetricValue"] {
   font-feature-settings: "tnum" 1;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.025em !important;
+  letter-spacing: -0.02em !important;
   font-variation-settings: "wght" 700;
-  background: linear-gradient(180deg, #f8fafc 0%, color-mix(in oklch, #f8fafc 75%, var(--accent, #38bdf8)) 100%);
-  -webkit-background-clip: text;
-          background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 1px 0 rgba(0,0,0,0.4));
+  /* Phase 24 fix: gradient text clipping was breaking line-height + causing
+     the value to overflow its tile. Use a solid color and a subtle text
+     shadow instead — keeps the numbers crisp and INSIDE the box. */
+  color: #f1f5f9 !important;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
+  line-height: 1.15 !important;
+  overflow: visible;
+  word-break: keep-all;
+  white-space: nowrap;
+}
+/* Make sure label + delta also live cleanly inside the box */
+[data-testid="stMetricLabel"] {
+  white-space: normal !important;
+  line-height: 1.25 !important;
+  font-size: 12px !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase;
+  color: rgba(226,232,240,0.62) !important;
+}
+[data-testid="stMetricDelta"] {
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+}
+[data-testid="stMetric"] {
+  padding: 18px 18px 16px 18px !important;
+  min-height: 96px;
+  overflow: hidden;
 }
 
-/* E. Custom cursor + delayed follower */
+/* E. Custom cursor + delayed follower
+   Phase 24 fix: the previous mix-blend: difference made the dot invisible
+   on neutral-gray Streamlit chrome. Switch to a high-contrast white core
+   with a colored glowing ring — visible on any background. */
 @media (hover: hover) and (pointer: fine) {
-  html { cursor: none; }
+  html, body { cursor: auto; }     /* keep system cursor as a fallback */
   input, textarea, [contenteditable="true"], select { cursor: text; }
-  a, button, [role="button"], .stButton > button, [data-baseweb="tab"] { cursor: none; }
 
   .ultra-cursor {
     position: fixed; top: 0; left: 0;
-    width: 10px; height: 10px;
+    width: 8px; height: 8px;
     border-radius: 50%;
-    background: var(--accent, #38bdf8);
+    background: #ffffff;
     transform: translate(-50%, -50%);
     pointer-events: none;
-    z-index: 9999;
-    mix-blend-mode: difference;
-    transition: width 180ms var(--spring-snappy), height 180ms var(--spring-snappy);
+    z-index: 2147483647;             /* on top of literally everything */
+    box-shadow:
+      0 0 0 2px rgba(56, 189, 248, 0.55),
+      0 0 18px 4px rgba(56, 189, 248, 0.45),
+      0 0 36px 8px rgba(168, 85, 247, 0.25);
+    transition: width 180ms var(--spring-snappy), height 180ms var(--spring-snappy),
+                background 200ms var(--ease-out-expo);
+    will-change: transform;
   }
   .ultra-cursor-follow {
     position: fixed; top: 0; left: 0;
-    width: 36px; height: 36px;
+    width: 38px; height: 38px;
     border-radius: 50%;
-    border: 1.5px solid color-mix(in oklch, var(--accent, #38bdf8) 70%, transparent);
+    border: 1.5px solid rgba(56, 189, 248, 0.65);
     transform: translate(-50%, -50%);
     pointer-events: none;
-    z-index: 9998;
-    transition: width 240ms var(--spring-soft), height 240ms var(--spring-soft);
+    z-index: 2147483646;
+    box-shadow: 0 0 22px rgba(56, 189, 248, 0.18) inset;
+    transition: width 240ms var(--spring-soft), height 240ms var(--spring-soft),
+                border-color 200ms var(--ease-out-expo),
+                opacity 200ms var(--ease-out-expo);
+    will-change: transform;
   }
-  body.ultra-cursor-hot .ultra-cursor { width: 16px; height: 16px; }
+  body.ultra-cursor-hot .ultra-cursor {
+    width: 14px; height: 14px;
+    background: #38bdf8;
+    box-shadow:
+      0 0 0 2px rgba(255,255,255,0.85),
+      0 0 24px 6px rgba(56, 189, 248, 0.7),
+      0 0 48px 12px rgba(168, 85, 247, 0.4);
+  }
   body.ultra-cursor-hot .ultra-cursor-follow {
-    width: 56px; height: 56px;
-    border-color: color-mix(in oklch, var(--accent, #38bdf8) 100%, transparent);
+    width: 64px; height: 64px;
+    border-color: rgba(56, 189, 248, 0.95);
   }
 }
 @media (hover: none), (pointer: coarse) {
@@ -1630,6 +1671,303 @@ p, [data-testid="stMarkdownContainer"] p { text-wrap: pretty; hanging-punctuatio
     animation-range: entry 10% cover 35%;
   }
   @keyframes ultra-underline { to { width: 64px; } }
+}
+
+/* ==== Phase 24 — UNIQUE TABS / SIDEBAR / SEARCH ============================
+   The default Streamlit chrome was too generic. This section completely
+   re-skins the three places users spend the most time: the top tab bar,
+   the left sidebar, and the search input.
+   ============================================================================ */
+
+/* ---- TABS: glass pills with sliding indicator + per-tab accent ---------- */
+.stTabs [data-baseweb="tab-list"] {
+  position: relative;
+  gap: 6px !important;
+  padding: 6px !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #0b1220 75%, transparent),
+      color-mix(in oklch, #0b1220 60%, transparent)) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid color-mix(in oklch, white 9%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 12px 40px -20px rgba(0,0,0,0.5);
+  margin-bottom: 22px !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+
+.stTabs [data-baseweb="tab"] {
+  position: relative;
+  border-radius: 13px !important;
+  padding: 10px 18px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.015em !important;
+  color: rgba(226,232,240,0.62) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  transition: all 280ms var(--ease-out-expo);
+  white-space: nowrap;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  color: rgba(226,232,240,0.92) !important;
+  background: color-mix(in oklch, white 5%, transparent) !important;
+  transform: translateY(-1px);
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+  color: #f8fafc !important;
+  background: linear-gradient(135deg,
+    color-mix(in oklch, #38bdf8 22%, transparent),
+    color-mix(in oklch, #a855f7 22%, transparent)) !important;
+  border-color: color-mix(in oklch, #38bdf8 45%, transparent) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, #38bdf8 25%, transparent) inset,
+    0 8px 24px -12px color-mix(in oklch, #38bdf8 80%, transparent),
+    0 0 22px -6px color-mix(in oklch, #a855f7 60%, transparent);
+}
+/* Tiny dot indicator under the active tab */
+.stTabs [data-baseweb="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 50%; bottom: 4px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #38bdf8, #a855f7);
+  transform: translateX(-50%);
+  box-shadow: 0 0 8px rgba(56,189,248,0.8);
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+
+/* Hide the boring underline border under tab list */
+.stTabs [data-baseweb="tab-border"],
+.stTabs [data-baseweb="tab-list"] + div > div:first-child { background: transparent !important; }
+
+/* ---- SIDEBAR: vertical command rail with section dividers --------------- */
+section[data-testid="stSidebar"] {
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #0b1220 90%, transparent) 0%,
+      color-mix(in oklch, #050810 95%, transparent) 100%) !important;
+  border-right: 1px solid color-mix(in oklch, white 8%, transparent) !important;
+  box-shadow: 1px 0 30px -10px rgba(0,0,0,0.5);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+section[data-testid="stSidebar"] > div:first-child {
+  padding-top: 18px !important;
+}
+/* Decorative top accent bar in sidebar */
+section[data-testid="stSidebar"]::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 12px; right: 12px;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent, #38bdf8 20%, #a855f7 50%, #22d3ee 80%, transparent);
+  opacity: 0.65;
+  border-radius: 999px;
+  filter: blur(0.5px);
+}
+/* Vertical glow rail along the sidebar's right edge */
+section[data-testid="stSidebar"]::after {
+  content: "";
+  position: absolute;
+  top: 60px; bottom: 60px; right: -1px;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent, color-mix(in oklch, #38bdf8 50%, transparent) 30%,
+    color-mix(in oklch, #a855f7 50%, transparent) 70%, transparent);
+  opacity: 0.5;
+}
+
+/* Sidebar headings — small caps, gradient bullet */
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase;
+  color: rgba(148,163,184,0.85) !important;
+  margin: 18px 0 10px 0 !important;
+  padding-left: 14px;
+  position: relative;
+}
+section[data-testid="stSidebar"] h1::before,
+section[data-testid="stSidebar"] h2::before,
+section[data-testid="stSidebar"] h3::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  width: 6px; height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #38bdf8, #a855f7);
+  box-shadow: 0 0 8px rgba(56,189,248,0.6);
+}
+
+/* Sidebar buttons — full-width, icon-rail style */
+section[data-testid="stSidebar"] .stButton > button {
+  width: 100%;
+  text-align: left !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: rgba(226,232,240,0.78) !important;
+  font-weight: 500 !important;
+  padding: 10px 12px !important;
+  position: relative;
+  transition: all 220ms var(--ease-out-expo);
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+  background: color-mix(in oklch, white 5%, transparent) !important;
+  border-color: color-mix(in oklch, #38bdf8 30%, transparent) !important;
+  color: #f8fafc !important;
+  padding-left: 18px !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover::before {
+  content: "";
+  position: absolute;
+  left: 6px; top: 50%;
+  width: 3px; height: 18px;
+  margin-top: -9px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #38bdf8, #a855f7);
+}
+
+/* Sidebar widgets (selectbox, slider, radio) */
+section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea {
+  background: color-mix(in oklch, #0b1220 60%, transparent) !important;
+  border: 1px solid color-mix(in oklch, white 8%, transparent) !important;
+  border-radius: 10px !important;
+  color: #e2e8f0 !important;
+}
+
+/* ---- SEARCH BAR: cutting-edge animated focus ring + live indicator ----- */
+/* We can't add HTML around Streamlit's input from CSS, so we restyle the
+   input widget heavily so it FEELS like a command palette. The two main
+   text_input boxes (Predict tab + recent searches) get this treatment. */
+
+[data-testid="stTextInput"] {
+  position: relative;
+}
+[data-testid="stTextInput"] > div > div {
+  position: relative;
+  border-radius: 14px !important;
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #0b1220 70%, transparent),
+      color-mix(in oklch, #0b1220 90%, transparent)) !important;
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid color-mix(in oklch, white 10%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 8px 24px -16px rgba(0,0,0,0.5);
+  transition: all 240ms var(--ease-out-expo);
+  overflow: visible;
+}
+[data-testid="stTextInput"] > div > div::before {
+  /* Animated gradient border — uses background-clip trick + animation */
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 14px;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--search-angle, 0deg),
+    transparent 0deg,
+    #38bdf8 90deg,
+    #a855f7 180deg,
+    #22d3ee 270deg,
+    transparent 360deg);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 280ms var(--ease-out-expo);
+  pointer-events: none;
+  animation: search-rotate 4s linear infinite;
+}
+@property --search-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes search-rotate { to { --search-angle: 360deg; } }
+
+[data-testid="stTextInput"] > div > div:focus-within {
+  border-color: color-mix(in oklch, #38bdf8 55%, transparent) !important;
+  box-shadow:
+    0 0 0 4px color-mix(in oklch, #38bdf8 18%, transparent),
+    0 12px 40px -18px color-mix(in oklch, #38bdf8 70%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  transform: translateY(-1px);
+}
+[data-testid="stTextInput"] > div > div:focus-within::before { opacity: 1; }
+
+/* Magnifier glass icon prepended to text inputs */
+[data-testid="stTextInput"] > div > div > input {
+  background: transparent !important;
+  border: none !important;
+  padding: 14px 16px 14px 44px !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  color: #f1f5f9 !important;
+  letter-spacing: 0.005em;
+}
+[data-testid="stTextInput"] > div > div > input::placeholder {
+  color: rgba(148,163,184,0.55) !important;
+  font-weight: 400;
+}
+[data-testid="stTextInput"] > div > div > input:focus { outline: none !important; }
+
+[data-testid="stTextInput"] > div > div::after {
+  content: "";
+  position: absolute;
+  left: 16px; top: 50%;
+  width: 14px; height: 14px;
+  margin-top: -7px;
+  pointer-events: none;
+  /* SVG magnifier — encoded inline so no fetch */
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>") center/contain no-repeat;
+  opacity: 0.7;
+  transition: opacity 220ms, filter 220ms;
+}
+[data-testid="stTextInput"] > div > div:focus-within::after {
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(56,189,248,0.6));
+}
+
+/* Right-aligned hint chip showing keyboard shortcut */
+[data-testid="stTextInput"] > label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase;
+  color: rgba(148,163,184,0.75) !important;
+  margin-bottom: 6px !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+[data-testid="stTextInput"] > label::after {
+  content: "⌘K";
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: rgba(148,163,184,0.85);
+  background: color-mix(in oklch, white 6%, transparent);
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklch, white 10%, transparent);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
 }
 
 /* Reduced motion */
