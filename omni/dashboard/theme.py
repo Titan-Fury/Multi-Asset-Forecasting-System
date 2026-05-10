@@ -2135,6 +2135,135 @@ section[data-testid="stSidebar"]::after {
   .ultra-marquee__track, .hero h1, .ultra-status__dot { animation: none !important; }
   .ultra-lighthouse { display: none; }
 }
+
+/* ==== Phase 24.8 — PRODUCTION ACCESSIBILITY POLISH ========================
+   Addresses concrete UX/accessibility issues:
+   1. WCAG-compliant text contrast on all helper / instruction copy
+   2. Pill / chip legibility (bigger, higher-contrast)
+   3. Sidebar collapse button always clickable + on top
+   4. Cleaner ticker input field (no overcrowding)
+   5. Caption / muted text upgraded from rgba(...,0.45) to ≥0.75
+   =========================================================================== */
+
+/* (1) Helper / muted text now slate-300+ (WCAG AA on dark bg) */
+.stApp [data-testid="stCaptionContainer"],
+.stApp .stCaption,
+.stApp [data-testid="stMarkdownContainer"] small,
+.stApp [data-testid="stMarkdownContainer"] em,
+[data-testid="stWidgetLabel"] {
+  color: rgba(203, 213, 225, 0.85) !important;   /* slate-300 / ~5.5:1 contrast */
+  font-weight: 500 !important;
+}
+.stApp [data-testid="stMarkdownContainer"] {
+  color: #e2e8f0;
+}
+.stApp [data-testid="stInfo"] {
+  background: color-mix(in oklch, #38bdf8 12%, transparent) !important;
+  border: 1px solid color-mix(in oklch, #38bdf8 30%, transparent) !important;
+  color: #e0f2fe !important;
+}
+
+/* (2) Pill / chip legibility */
+.stMultiSelect [data-baseweb="tag"],
+.stSelectbox [data-baseweb="tag"],
+[data-baseweb="tag"] {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+  background: color-mix(in oklch, #38bdf8 16%, transparent) !important;
+  border: 1px solid color-mix(in oklch, #38bdf8 35%, transparent) !important;
+  color: #e0f2fe !important;
+}
+[data-baseweb="tag"] svg { fill: #e0f2fe !important; opacity: 0.8 !important; }
+
+/* (3) SIDEBAR REOPEN BUG FIX
+   The previous Phase 24.5 rules made the toggle pretty but Streamlit's
+   collapsedControl became un-clickable after a close because the confetti
+   canvas (z-index 1003, full viewport) was layered above it. Fix: bump
+   collapsedControl's z-index over everything and ensure pointer-events. */
+[data-testid="collapsedControl"],
+button[data-testid="stSidebarCollapsedControl"],
+button[data-testid="stSidebarCollapseButton"] {
+  z-index: 2147483600 !important;
+  pointer-events: auto !important;
+}
+.ultra-confetti { z-index: 1500 !important; }
+.ultra-marquee  { z-index: 1100 !important; }
+.ultra-status   { z-index: 1100 !important; }
+.ultra-lighthouse { z-index: 1 !important; }
+
+/* (4) Cleaner ticker input — give the chevron + clear button breathing room */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stTextInput"] > div > div {
+  padding-right: 8px !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+  padding: 4px 4px 4px 16px !important;
+}
+[data-testid="stSelectbox"] [aria-label="Clear value"],
+[data-testid="stSelectbox"] [aria-label="open"] {
+  margin-left: 4px !important;
+  opacity: 0.65;
+  transition: opacity 180ms var(--ease-out-expo);
+}
+[data-testid="stSelectbox"] [aria-label="Clear value"]:hover,
+[data-testid="stSelectbox"] [aria-label="open"]:hover {
+  opacity: 1;
+}
+
+/* (5) Search-history expander — was sprawling full-width with thin text.
+   Compact it: smaller header, bordered chip-style. */
+[data-testid="stExpander"] > details > summary {
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: rgba(203, 213, 225, 0.95) !important;
+  background: color-mix(in oklch, #0b1220 60%, transparent) !important;
+  border-radius: 12px !important;
+  border: 1px solid color-mix(in oklch, white 6%, transparent) !important;
+  list-style: none;
+  cursor: pointer;
+}
+[data-testid="stExpander"] > details > summary:hover {
+  background: color-mix(in oklch, #0b1220 80%, transparent) !important;
+  border-color: color-mix(in oklch, #38bdf8 30%, transparent) !important;
+}
+
+/* Universal sidebar safety: ensure inner content has proper left padding so
+   no labels ever clip on the leftmost edge. */
+section[data-testid="stSidebar"] > div:first-child > div:first-child {
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+  padding-top: 18px !important;
+}
+
+/* The "Force refresh" button: when it's a regular st.button, make sure it
+   does NOT show a checkbox-looking glyph. The 🔄 emoji can render as a
+   small box on systems missing the emoji font. We removed the emoji from
+   app.py; this rule just polishes the button shape. */
+.stButton > button:not([kind="primary"]) {
+  border: 1px solid color-mix(in oklch, white 12%, transparent) !important;
+  background: color-mix(in oklch, #0b1220 50%, transparent) !important;
+  color: rgba(226, 232, 240, 0.92) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+}
+.stButton > button:not([kind="primary"]):hover {
+  border-color: color-mix(in oklch, #38bdf8 50%, transparent) !important;
+  background: color-mix(in oklch, #0b1220 70%, transparent) !important;
+  color: #f1f5f9 !important;
+}
+
+/* Help-icon (the small ⓘ next to widget labels) */
+[data-testid="stTooltipIcon"] svg {
+  fill: rgba(203, 213, 225, 0.55) !important;
+  transition: fill 200ms var(--ease-out-expo);
+}
+[data-testid="stTooltipIcon"]:hover svg {
+  fill: #38bdf8 !important;
+}
 </style>
 """
 

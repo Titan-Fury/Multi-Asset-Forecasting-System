@@ -1015,13 +1015,18 @@ def _render_predict_tab() -> None:
     # Lazy imports — avoid pulling pandas/xgboost into the sidebar render
     from omni.ondemand.predict import deep_analysis, predict_ticker
 
+    # Phase 24.8 — concise primary instruction with a tooltip for details.
+    # Replaces the long "Type any ticker — searches NSE, NASDAQ, NYSE, ..."
+    # banner with a tight headline + ⓘ help icon (delivered via the
+    # text_input's `help=` arg below).
     st.markdown(
-        "<div style='font-family:Inter,sans-serif;color:var(--text-secondary);"
-        "font-size:0.92rem;margin-bottom:8px;'>"
-        "Type any ticker — searches <b>NSE</b>, <b>NASDAQ</b>, <b>NYSE</b>, "
-        "<b>crypto</b>, <b>FX</b> live across Yahoo Finance + NSE + CoinGecko. "
-        "Free-form entries are resolved."
-        "</div>",
+        "<div style='display:flex;align-items:baseline;gap:10px;"
+        "margin-bottom:6px;font-family:Inter,sans-serif;'>"
+        "<span style='font-size:13px;font-weight:600;letter-spacing:0.04em;"
+        "text-transform:uppercase;color:#cbd5e1;'>Search</span>"
+        "<span style='font-size:12px;color:rgba(203,213,225,0.65);'>"
+        "any ticker, name, or alias — resolves NSE / NASDAQ / NYSE / crypto / FX"
+        "</span></div>",
         unsafe_allow_html=True,
     )
 
@@ -1084,12 +1089,13 @@ def _render_predict_tab() -> None:
         deep_clicked = st.button("Deep analysis (~15s)", width='stretch')
     with col_refresh:
         st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
+        # Phase 24.8 — was showing "🔄 Force refresh" — the emoji rendered as
+        # an ambiguous checkbox-looking glyph on some Windows fonts. Replaced
+        # with a clean text label; intent is clear, no glyph confusion.
         refresh_clicked = st.button(
-            "🔄 Force refresh", width='stretch',
-            help="Drop the cached prediction + prices + news for this "
-                  "ticker and re-fetch live. Use when you want intraday-fresh "
-                  "data (default cache is 30 min for predictions, 30 min for "
-                  "news, 4 h for prices).",
+            "Force refresh", width='stretch',
+            help="Drop cached prediction + prices + news for this ticker "
+                  "and re-fetch live. Use when you want intraday-fresh data.",
         )
 
     raw = _parse_label(choice) if choice else ""
