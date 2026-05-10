@@ -352,16 +352,17 @@ section[data-testid="stSidebar"] {
 .stTabs [role="tablist"] {
     gap: var(--space-1);
     background: var(--surface-0);
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid rgba(148,163,184,0.10);
     padding: 4px 4px 0 4px;
     /* Stick to the top of the viewport when the user scrolls within a tab */
     position: sticky;
     top: 0;
     z-index: 50;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     overflow-x: auto;
     scrollbar-width: thin;
+    box-shadow: 0 1px 0 rgba(148,163,184,0.06);
 }
 .stTabs [role="tablist"]::-webkit-scrollbar { height: 4px; }
 .stTabs [role="tablist"]::-webkit-scrollbar-thumb {
@@ -377,9 +378,10 @@ section[data-testid="stSidebar"] {
     font-weight: 500 !important;
     backdrop-filter: none;
     white-space: nowrap;
-    transition: color 180ms cubic-bezier(0.4, 0, 0.2, 1),
-                  border-color 180ms cubic-bezier(0.4, 0, 0.2, 1),
-                  transform 120ms ease;
+    position: relative;
+    transition: color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                  border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 140ms ease;
 }
 .stTabs [role="tab"]:hover {
     color: var(--text-primary) !important;
@@ -387,17 +389,69 @@ section[data-testid="stSidebar"] {
 }
 .stTabs [role="tab"][aria-selected="true"] {
     color: var(--text-primary) !important;
-    border-bottom: 2px solid var(--accent) !important;
     background: transparent !important;
     font-weight: 600 !important;
+    /* Animated cyan→violet underline indicator */
+    border-bottom: 2px solid transparent !important;
+    background-image: linear-gradient(transparent calc(100% - 2px),
+                                        var(--accent) calc(100% - 2px),
+                                        #8b5cf6 100%) !important;
 }
-/* Smooth tab-panel fade-in */
+/* Smoother tab-panel fade with ease-out-expo curve */
 .stTabs [role="tabpanel"] {
-    animation: tabFadeIn 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    animation: tabFadeIn 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes tabFadeIn {
-    from { opacity: 0; transform: translateY(4px); }
+    from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- KPI metric tiles: subtle hover lift ---- */
+[data-testid="stMetric"] {
+    transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+                  box-shadow 220ms ease;
+}
+[data-testid="stMetric"]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px -8px rgba(6, 182, 212, 0.25) !important;
+}
+
+/* ---- Dataframe row hover (cyan tint) ---- */
+[data-testid="stDataFrame"] [data-testid="stTable"] tr:hover,
+[data-testid="stDataFrame"] table tbody tr:hover {
+    background: rgba(6, 182, 212, 0.06) !important;
+    transition: background 120ms ease;
+}
+
+/* ---- Slider track gradient (brand cyan→violet) ---- */
+.stSlider [data-baseweb="slider"] [role="progressbar"] {
+    background: linear-gradient(90deg, var(--accent), #8b5cf6) !important;
+}
+.stSlider [data-baseweb="slider"] [role="slider"] {
+    background: var(--accent) !important;
+    box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.15) !important;
+    transition: box-shadow 160ms ease, transform 120ms ease;
+}
+.stSlider [data-baseweb="slider"] [role="slider"]:hover {
+    box-shadow: 0 0 0 6px rgba(6, 182, 212, 0.22) !important;
+    transform: scale(1.05);
+}
+
+/* ---- Button micro-interactions: tactile :active scale ---- */
+.stButton > button {
+    transition: background 160ms ease,
+                  border-color 160ms ease,
+                  transform 80ms cubic-bezier(0.16, 1, 0.3, 1),
+                  box-shadow 160ms ease !important;
+}
+.stButton > button:active {
+    transform: scale(0.97) !important;
+}
+
+/* ---- Progress bar: smoother brand colour ---- */
+.stProgress [role="progressbar"] > div > div {
+    background: linear-gradient(90deg, var(--accent), #8b5cf6) !important;
+    transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 /* ---- expander ---- */

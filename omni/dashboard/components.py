@@ -11,6 +11,13 @@ import streamlit as st
 
 from omni.dashboard.theme import pill, regime_gradient
 
+try:
+    import plotly.graph_objects as go  # type: ignore
+    HAS_PLOTLY = True
+except ImportError:  # pragma: no cover
+    go = None  # type: ignore
+    HAS_PLOTLY = False
+
 
 _REGIME_COLORS = {
     "bull":   "#16a34a",
@@ -174,7 +181,6 @@ def universe_heatmap(signals: pd.DataFrame) -> None:
     pivot = df.pivot_table(index="asset_class", columns="ticker",
                            values="score", aggfunc="first")
     try:
-        import plotly.graph_objects as go
         fig = go.Figure(data=go.Heatmap(
             z=pivot.values,
             x=list(pivot.columns),
@@ -247,7 +253,6 @@ def signal_card(row: pd.Series) -> None:
 
     if not pdf.empty:
         try:
-            import plotly.graph_objects as go
             colors = ["#06b6d4", "#8b5cf6", "#ec4899", "#22d3ee"]
             fig = go.Figure(go.Bar(
                 x=pdf["pillar"], y=pdf["score"],
@@ -281,7 +286,6 @@ def calibration_panel(preds: pd.DataFrame) -> None:
             tab = calibration_table(preds, n_bins=10)
             if not tab.empty:
                 try:
-                    import plotly.graph_objects as go
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(
                         x=tab["bin_mean_p"], y=tab["bin_mean_y"],
@@ -313,7 +317,6 @@ def calibration_panel(preds: pd.DataFrame) -> None:
             lift = decile_lift(preds, n_bins=10)
             if not lift.empty:
                 try:
-                    import plotly.graph_objects as go
                     colors = ["#06b6d4" if v >= 0 else "#dc2626"
                               for v in lift["mean_fwd_ret"]]
                     fig = go.Figure(go.Bar(
@@ -1044,7 +1047,6 @@ def prediction_card(card_dict: dict) -> None:
     if not pdf.empty:
         st.markdown("##### Rubric pillars")
         try:
-            import plotly.graph_objects as go
             colors = ["#06b6d4", "#8b5cf6", "#ec4899", "#22d3ee"]
             fig = go.Figure(go.Bar(
                 x=pdf["pillar"], y=pdf["score"],
