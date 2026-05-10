@@ -1390,117 +1390,156 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 /* C. Goo filter on orbs (opt-in via body.fx-goo) */
 body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
 
-/* D. Iridescent KPI tiles (subtle — must NOT cover the numbers) */
+/* ===========================================================================
+   PRODUCTION-GRADE METRIC TILES (Phase 24.1)
+   The default Streamlit metric value runs ~44-48px which overflowed our
+   tiles. Lock everything down: explicit value/label/delta sizes, generous
+   padding, proper spacing rhythm. Box auto-grows; nothing escapes it.
+   =========================================================================== */
+
+[data-testid="stMetric"] {
+  position: relative;
+  /* tile box */
+  padding: 16px 18px 14px 18px !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #0e1525 88%, transparent),
+      color-mix(in oklch, #0a0f1c 92%, transparent)) !important;
+  border: 1px solid color-mix(in oklch, white 7%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 24px -16px rgba(0, 0, 0, 0.5);
+  /* layout */
+  display: flex !important;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 120px;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    transform 320ms var(--ease-out-expo),
+    border-color 220ms var(--ease-out-expo),
+    box-shadow 220ms var(--ease-out-expo);
+}
+[data-testid="stMetric"]:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, #38bdf8 35%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 16px 40px -20px color-mix(in oklch, #38bdf8 60%, transparent),
+    0 0 0 1px color-mix(in oklch, #38bdf8 18%, transparent) inset;
+}
+[data-testid="stMetric"] > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- LABEL: small-caps tracking ---- */
+[data-testid="stMetric"] [data-testid="stMetricLabel"],
+[data-testid="stMetric"] label {
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  color: rgba(148, 163, 184, 0.72) !important;
+  line-height: 1.3 !important;
+  margin: 0 !important;
+  white-space: normal !important;
+}
+
+/* ---- VALUE: locked size, never overflows ---- */
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+  font-size: 30px !important;
+  line-height: 1.15 !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em !important;
+  font-feature-settings: "tnum" 1, "ss01" 1 !important;
+  font-variant-numeric: tabular-nums !important;
+  color: #f1f5f9 !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  margin: 2px 0 0 0 !important;
+  padding: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Children of the value (Streamlit nests an extra <div>) */
+[data-testid="stMetric"] [data-testid="stMetricValue"] > div,
+[data-testid="stMetric"] [data-testid="stMetricValue"] > * {
+  font-size: inherit !important;
+  line-height: inherit !important;
+  margin: 0 !important;
+}
+
+/* ---- DELTA: chip pill, INSIDE the box, with breathing room ---- */
+[data-testid="stMetric"] [data-testid="stMetricDelta"] {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0.005em !important;
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0 0 !important;
+  width: fit-content;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: color-mix(in oklch, #4ade80 14%, transparent) !important;
+  color: #86efac !important;
+  border: 1px solid color-mix(in oklch, #4ade80 25%, transparent);
+}
+/* Negative delta — red chip */
+[data-testid="stMetric"] [data-testid="stMetricDelta"][class*="negative"],
+[data-testid="stMetric"] [data-testid="stMetricDelta"]:has(svg[fill*="rgb(255"]) {
+  background: color-mix(in oklch, #f87171 14%, transparent) !important;
+  color: #fca5a5 !important;
+  border-color: color-mix(in oklch, #f87171 25%, transparent) !important;
+}
+
+/* ---- Iridescent glow stays subtle and BEHIND content ---- */
 [data-testid="stMetric"]::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: conic-gradient(
-    from calc(var(--mx, 50) * 1deg) at var(--mx, 50%) var(--my, 50%),
-    transparent 0deg,
-    color-mix(in oklch, #22d3ee 12%, transparent) 60deg,
-    color-mix(in oklch, #a855f7 14%, transparent) 180deg,
-    color-mix(in oklch, #f472b6 12%, transparent) 270deg,
-    transparent 360deg
-  );
+  z-index: 0;
+  background:
+    radial-gradient(
+      circle at var(--mx, 50%) var(--my, 50%),
+      color-mix(in oklch, #38bdf8 18%, transparent) 0%,
+      transparent 55%
+    );
   opacity: 0;
-  mix-blend-mode: soft-light;
   transition: opacity 320ms var(--ease-out-expo);
-  z-index: 0;        /* BEHIND the value, not on top */
 }
-[data-testid="stMetric"]:hover::after { opacity: 0.35; }
-[data-testid="stMetric"] > * { position: relative; z-index: 1; }
+[data-testid="stMetric"]:hover::after { opacity: 0.7; }
 
-[data-testid="stMetric"] [data-testid="stMetricValue"] {
-  font-feature-settings: "tnum" 1;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em !important;
-  font-variation-settings: "wght" 700;
-  /* Phase 24 fix: gradient text clipping was breaking line-height + causing
-     the value to overflow its tile. Use a solid color and a subtle text
-     shadow instead — keeps the numbers crisp and INSIDE the box. */
-  color: #f1f5f9 !important;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
-  line-height: 1.15 !important;
-  overflow: visible;
-  word-break: keep-all;
-  white-space: nowrap;
-}
-/* Make sure label + delta also live cleanly inside the box */
-[data-testid="stMetricLabel"] {
-  white-space: normal !important;
-  line-height: 1.25 !important;
-  font-size: 12px !important;
-  letter-spacing: 0.04em !important;
-  text-transform: uppercase;
-  color: rgba(226,232,240,0.62) !important;
-}
-[data-testid="stMetricDelta"] {
-  font-size: 12px !important;
-  line-height: 1.2 !important;
-}
-[data-testid="stMetric"] {
-  padding: 18px 18px 16px 18px !important;
-  min-height: 96px;
-  overflow: hidden;
-}
+/* E. Cursor & hover-halo (Phase 24.1 — production-grade)
+   The previous "custom cursor" approach was fragile: Streamlit re-mounts the
+   DOM constantly which orphaned the cursor div, and `mix-blend-mode` made it
+   invisible on dark backgrounds. We now use the SYSTEM cursor (always
+   visible, accessible, expected) and add a bold cyan halo that follows the
+   cursor only when hovering interactive elements. This is the same pattern
+   Linear / Vercel / Stripe Dashboard use. */
 
-/* E. Custom cursor + delayed follower
-   Phase 24 fix: the previous mix-blend: difference made the dot invisible
-   on neutral-gray Streamlit chrome. Switch to a high-contrast white core
-   with a colored glowing ring — visible on any background. */
-@media (hover: hover) and (pointer: fine) {
-  html, body { cursor: auto; }     /* keep system cursor as a fallback */
-  input, textarea, [contenteditable="true"], select { cursor: text; }
+/* Hide the previous JS-driven cursor divs entirely */
+.ultra-cursor, .ultra-cursor-follow { display: none !important; }
 
-  .ultra-cursor {
-    position: fixed; top: 0; left: 0;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #ffffff;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 2147483647;             /* on top of literally everything */
-    box-shadow:
-      0 0 0 2px rgba(56, 189, 248, 0.55),
-      0 0 18px 4px rgba(56, 189, 248, 0.45),
-      0 0 36px 8px rgba(168, 85, 247, 0.25);
-    transition: width 180ms var(--spring-snappy), height 180ms var(--spring-snappy),
-                background 200ms var(--ease-out-expo);
-    will-change: transform;
-  }
-  .ultra-cursor-follow {
-    position: fixed; top: 0; left: 0;
-    width: 38px; height: 38px;
-    border-radius: 50%;
-    border: 1.5px solid rgba(56, 189, 248, 0.65);
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 2147483646;
-    box-shadow: 0 0 22px rgba(56, 189, 248, 0.18) inset;
-    transition: width 240ms var(--spring-soft), height 240ms var(--spring-soft),
-                border-color 200ms var(--ease-out-expo),
-                opacity 200ms var(--ease-out-expo);
-    will-change: transform;
-  }
-  body.ultra-cursor-hot .ultra-cursor {
-    width: 14px; height: 14px;
-    background: #38bdf8;
-    box-shadow:
-      0 0 0 2px rgba(255,255,255,0.85),
-      0 0 24px 6px rgba(56, 189, 248, 0.7),
-      0 0 48px 12px rgba(168, 85, 247, 0.4);
-  }
-  body.ultra-cursor-hot .ultra-cursor-follow {
-    width: 64px; height: 64px;
-    border-color: rgba(56, 189, 248, 0.95);
-  }
+/* Make sure the system cursor is always shown */
+html, body, * { cursor: auto; }
+a, button, [role="button"], .stButton > button, [data-baseweb="tab"],
+[data-testid="stMetric"], [data-testid="stExpander"] > details summary {
+  cursor: pointer;
 }
-@media (hover: none), (pointer: coarse) {
-  .ultra-cursor, .ultra-cursor-follow { display: none; }
-}
+input, textarea, [contenteditable="true"], select { cursor: text; }
+[disabled] { cursor: not-allowed; }
 
 /* F. Marquee ticker tape */
 .ultra-marquee {
