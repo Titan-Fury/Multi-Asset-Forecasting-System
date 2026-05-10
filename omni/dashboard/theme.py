@@ -1391,18 +1391,27 @@ body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
   min-height: 120px;
   overflow: hidden;
   isolation: isolate;
+  /* outline must always be transparent + offset 0; we use box-shadow only */
+  outline: none !important;
   transition:
-    transform 320ms var(--ease-out-expo),
-    border-color 220ms var(--ease-out-expo),
-    box-shadow 220ms var(--ease-out-expo);
+    transform 380ms var(--ease-out-expo),
+    border-color 280ms var(--ease-out-expo),
+    box-shadow 280ms var(--ease-out-expo),
+    background 280ms var(--ease-out-expo);
 }
 [data-testid="stMetric"]:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in oklch, #38bdf8 35%, transparent) !important;
+  transform: translateY(-3px);
+  border-color: color-mix(in oklch, #38bdf8 32%, transparent) !important;
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklch, #111c30 90%, transparent),
+      color-mix(in oklch, #0a0f1c 95%, transparent)) !important;
+  /* Smooth multi-layer halo — no harsh outline ring */
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 16px 40px -20px color-mix(in oklch, #38bdf8 60%, transparent),
-    0 0 0 1px color-mix(in oklch, #38bdf8 18%, transparent) inset;
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 0 1px color-mix(in oklch, #38bdf8 35%, transparent) inset,
+    0 16px 48px -20px color-mix(in oklch, #38bdf8 55%, transparent),
+    0 4px 18px -8px color-mix(in oklch, #a855f7 35%, transparent);
 }
 [data-testid="stMetric"] > * {
   position: relative;
@@ -1592,21 +1601,11 @@ input, textarea, [contenteditable="true"], select { cursor: text; }
 }
 .ultra-digit__strip > span { height: 10%; display: block; text-align: center; }
 
-/* H. Outline draw on cards */
-[data-testid="stMetric"] {
-  outline: 1px solid transparent;
-  outline-offset: 0;
-  transition:
-    outline-color 320ms var(--ease-out-expo),
-    outline-offset 320ms var(--ease-out-expo),
-    transform 380ms var(--spring-soft),
-    border-color 220ms var(--ease-out-expo),
-    box-shadow 220ms var(--ease-out-expo);
-}
-[data-testid="stMetric"]:hover {
-  outline-color: color-mix(in oklch, var(--accent, #38bdf8) 70%, transparent);
-  outline-offset: 4px;
-}
+/* H. Outline draw on cards (DEPRECATED Phase 24.4 — replaced by smooth halo
+   in the Phase 24.1 metric tile block above. The outline-offset trick was
+   creating a hard floating ring that looked unrefined. We now use layered
+   box-shadows for a soft premium glow.) */
+/* Intentionally left empty so this section header stays in the change log. */
 
 /* I. Gradient scrollbar */
 * { scrollbar-width: thin; scrollbar-color: color-mix(in oklch, #38bdf8 65%, transparent) transparent; }
