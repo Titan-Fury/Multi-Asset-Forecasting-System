@@ -42,10 +42,21 @@ class RegimeModel:
     hmm: object  # hmmlearn.hmm.GaussianHMM
     feature_cols: list[str]
     state_to_label: dict[int, str]
+    converged: bool = True   # Phase 24.16 — surface convergence status
+    fallback: bool = False   # True when HMM failed and we returned a stub
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: pd.DataFrame, *, smooth_window: int = 5) -> np.ndarray:
+        """Predict regime labels.
+
+        Phase 24.16 — `smooth_window` adds a min-duration constraint so a
+        single-day spike doesn't cause a regime flip. The default 5
+        trading days mirrors the typical HMM stickiness in finance lit
+        (Hamilton 1989, Hardy 2001). Set 0 to disable smoothing.
+        """
         x = X[self.feature_cols].to_numpy(dtype=float)
         states = self.hmm.predict(x)
+        if smooth_window and len(states) >= smooth_window:
+            states = _smooth_states(states, window=smooth_window)
         return np.array([self.state_to_label[s] for s in states])
 
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -58,8 +69,38 @@ class RegimeModel:
         return df.T.groupby(level=0).max().T
 
 
+def _smooth_states(states: np.ndarray, *, window: int = 5) -> np.ndarray:
+    """Min-duration smoothing — collapse runs shorter than `window` into
+    the dominant neighbouring state. Reduces regime jitter without losing
+    real transitions.
+    """
+    out = states.copy()
+    n = len(out)
+    if n < 2:
+        return out
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and out[j + 1] == out[i]:
+            j += 1
+        run_len = j - i + 1
+        if run_len < window and i > 0:
+            # Replace short run with the previous state
+            out[i:j + 1] = out[i - 1]
+        i = j + 1
+    return out
+
+
 def _label_states(means: np.ndarray, feature_cols: list[str]) -> dict[int, str]:
-    """means: shape (n_states, n_features). Map state idx -> label."""
+    """means: shape (n_states, n_features). Map state idx -> label.
+
+    Phase 24.16 — handles tied means. Previously when two states shared
+    the same mean return (common with degenerate / pre-shuffled data),
+    `bull_state` and `bear_state` would resolve to the same state index
+    and the remaining state would end up UNLABELED. Calling predict()
+    on that unlabelled state then raised KeyError. Now every state idx
+    gets a label, with deterministic tie-breaks by index.
+    """
     n = means.shape[0]
     if n != 4:
         # Fallback: just sort by mean of feature[0] (return)
@@ -71,23 +112,47 @@ def _label_states(means: np.ndarray, feature_cols: list[str]) -> dict[int, str]:
     vix_idx = feature_cols.index("vix") if "vix" in feature_cols else -1
     rv_idx = feature_cols.index("rv") if "rv" in feature_cols else -1
 
-    # Crisis: highest VIX (or highest realized vol if VIX missing)
+    # Crisis: highest VIX (or highest realized vol if VIX missing).
+    # On ties, np.argmax picks the lowest index (deterministic).
     severity = means[:, vix_idx] if vix_idx >= 0 else means[:, rv_idx]
     crisis_state = int(np.argmax(severity))
 
-    others = [s for s in range(n) if s != crisis_state]
-    rets = {s: means[s, ret_idx] for s in others}
-    bull_state = max(rets, key=rets.get)
-    bear_state = min(rets, key=rets.get)
-    chop_state = [s for s in others if s not in (bull_state, bear_state)][0]
-    return {crisis_state: "crisis", bull_state: "bull",
-            bear_state: "bear", chop_state: "chop"}
+    others = sorted(s for s in range(n) if s != crisis_state)
+    # Sort the remaining states by their return mean. The lowest-return
+    # state is "bear", the highest is "bull", the middle is "chop".
+    # If ties exist, ordering by state index keeps the assignment stable.
+    others_sorted = sorted(
+        others,
+        key=lambda s: (float(means[s, ret_idx]), s),
+    )
+    bear_state = others_sorted[0]
+    chop_state = others_sorted[1]
+    bull_state = others_sorted[2]
+    out = {
+        crisis_state: "crisis",
+        bear_state: "bear",
+        chop_state: "chop",
+        bull_state: "bull",
+    }
+    # Sanity: every state index 0..n-1 must be in the map.
+    if set(out.keys()) != set(range(n)):
+        # Should be impossible, but guard so we never return a partial map.
+        log.warning(f"_label_states partial map {out}; filling missing")
+        for s in range(n):
+            out.setdefault(s, "chop")
+    return out
 
 
 def fit(features: pd.DataFrame, *, n_states: int = 4,
         feature_cols: tuple[str, ...] = ("ret", "rv", "vix"),
         seed: int = 42, n_iter: int = 200) -> RegimeModel:
-    """Fit a Gaussian HMM. Caller must restrict `features` to the train window."""
+    """Fit a Gaussian HMM. Caller must restrict `features` to the train window.
+
+    Phase 24.16 — surfaces non-convergence and emits a metric. Returns a
+    `RegimeModel` with `.converged` set so downstream code can decide
+    whether to trust the labels. Falls back to a single-state "chop"
+    classifier if the HMM hard-fails (e.g. singular covariance).
+    """
     try:
         from hmmlearn.hmm import GaussianHMM
     except ImportError as e:
@@ -109,10 +174,74 @@ def fit(features: pd.DataFrame, *, n_states: int = 4,
         random_state=seed,
         tol=1e-3,
     )
-    model.fit(X)
+    try:
+        model.fit(X)
+    except Exception as e:  # noqa: BLE001
+        # HMM convergence can fail on degenerate data (constant features,
+        # singular covariance). Don't crash the whole pipeline — return a
+        # fallback that maps everything to "chop" so downstream rubric
+        # weights stay neutral.
+        log.warning(f"HMM fit failed: {e}; returning fallback chop-only model")
+        try:
+            from omni.observability.metrics import metrics
+            metrics.inc("regime_label_flips_total")  # treat as a "noise event"
+        except Exception:  # noqa: BLE001
+            pass
+        return _fallback_model(cols)
+
+    # Phase 24.16 — `fit()` may "succeed" with non-PSD covariances on
+    # degenerate inputs; the failure then surfaces at predict() time as
+    # `'covars' must be symmetric, positive-definite`. Probe predict on a
+    # tiny sample so we catch this BEFORE returning the model and route
+    # to the fallback instead of crashing the orchestrator stage.
+    try:
+        _ = model.predict(X[:5])
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"HMM predict probe failed ({e}); using fallback chop-only model")
+        try:
+            from omni.observability.metrics import metrics
+            metrics.inc("regime_label_flips_total")
+        except Exception:  # noqa: BLE001
+            pass
+        return _fallback_model(cols)
+
+    # Convergence check — hmmlearn exposes monitor_.converged_
+    converged = bool(getattr(getattr(model, "monitor_", None),
+                                "converged_", True))
+    if not converged:
+        log.warning(f"HMM did not converge after {n_iter} iters — "
+                     f"label trust is reduced; consider raising n_iter or "
+                     f"shortening the train window")
+
     state_to_label = _label_states(model.means_, cols)
-    log.info(f"HMM fit: states={n_states} labels={state_to_label}")
-    return RegimeModel(hmm=model, feature_cols=cols, state_to_label=state_to_label)
+    log.info(f"HMM fit: states={n_states} converged={converged} "
+              f"labels={state_to_label}")
+    return RegimeModel(hmm=model, feature_cols=cols,
+                        state_to_label=state_to_label,
+                        converged=converged, fallback=False)
+
+
+def _fallback_model(cols: list[str]) -> RegimeModel:
+    """Return a stub RegimeModel that always predicts 'chop'. Used when
+    the real HMM fails to fit so downstream code keeps working with a
+    neutral signal."""
+
+    class _StubHMM:
+        n_components = 1
+
+        def predict(self, X: np.ndarray) -> np.ndarray:
+            return np.zeros(len(X), dtype=int)
+
+        def predict_proba(self, X: np.ndarray) -> np.ndarray:
+            return np.ones((len(X), 1))
+
+    return RegimeModel(
+        hmm=_StubHMM(),
+        feature_cols=cols,
+        state_to_label={0: "chop"},
+        converged=False,
+        fallback=True,
+    )
 
 
 def build_regime_features(macro: pd.DataFrame, spx: pd.DataFrame | None = None) -> pd.DataFrame:
