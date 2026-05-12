@@ -60,12 +60,12 @@ Thumbs.db
 _*.py
 _*.err
 _*.out
-scratch/*
-!scratch/README.md
+scratch/
+!scratch/.gitkeep
 logs/*
 !logs/README.md
-secrets/*
-!secrets/README.md
+secrets/
+!secrets/.gitkeep
 tmp/
 .cache/
 
