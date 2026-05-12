@@ -62,8 +62,8 @@ _*.err
 _*.out
 scratch/
 !scratch/.gitkeep
-logs/*
-!logs/README.md
+logs/
+!logs/.gitkeep
 secrets/
 !secrets/.gitkeep
 tmp/
