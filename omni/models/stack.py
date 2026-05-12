@@ -206,7 +206,10 @@ def fit_stack(
         try:
             if mask.sum() > 50 and len(set(y[mask])) == 2:
                 oof_aucs[name] = float(roc_auc_score(y[mask], p[mask]))
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Single-class OOF window, sklearn version glitch, or numeric
+            # edge case. AUC is informational; missing it doesn't change
+            # the stacked model output.
             pass
 
     # Meta: train on OOF-stacked features (fill remaining NaNs with 0.5)

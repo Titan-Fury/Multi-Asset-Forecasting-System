@@ -222,8 +222,11 @@ def _train_one_horizon(df: pd.DataFrame, used: list[str], *,
         from sklearn.metrics import roc_auc_score
         if pred["y_true"].nunique() == 2:
             auc = float(roc_auc_score(pred["y_true"], pred["proba_up"]))
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # AUC computation is informational on the train script — a missing
+        # value just shows as N/A in the report, doesn't affect the saved
+        # model. Print at INFO so it's not totally invisible.
+        print(f"[train] OOS AUC unavailable: {exc}")
 
     feat_cols = res.feature_cols
     medians = sub[feat_cols].apply(pd.to_numeric, errors="coerce").median()
