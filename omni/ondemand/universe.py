@@ -308,8 +308,16 @@ def resolve(query: str) -> Resolution | None:
                 top = hits[0]
                 return Resolution(top.ticker, top.asset_class,
                                     top.display_name, confident=False)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # Live search backends can rate-limit or return malformed JSON;
+            # falling back to the curated lookup is fine but the failure
+            # should be discoverable in debug logs.
+            try:
+                import logging
+                logging.getLogger("omni.ondemand.universe").debug(
+                    "live search_tickers failed for %r: %s", q, exc)
+            except Exception:  # noqa: BLE001
+                pass
 
     # If user typed a spaced company-like name, prefer India compact ticker first.
     if " " in q and qn:
@@ -423,8 +431,15 @@ def suggestions(query: str, k: int = 10) -> list[Resolution]:
                 seen_now.add(key)
                 if len(flat) >= k:
                     break
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # Same as in `resolve()` — live search is best-effort augmentation
+            # over the curated list. Network/JSON errors fall back gracefully.
+            try:
+                import logging
+                logging.getLogger("omni.ondemand.universe").debug(
+                    "suggestions: live search failed for %r: %s", query, exc)
+            except Exception:  # noqa: BLE001
+                pass
 
     return flat[:k]
 

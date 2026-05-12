@@ -44,6 +44,22 @@ def _bench_card_cached(bench_ticker: str, bench_asset_class: str) -> dict | None
         return None
 
 
+@cached(ttl=TTL.news, key="bench_prices:{bench_ticker}:{bench_asset_class}")
+def _cached_bench_prices(bench_ticker: str, bench_asset_class: str) -> "pd.DataFrame | None":
+    """Phase 24.16 — restored. Earlier reference at line 85 called this helper
+    but it had been removed in a refactor, raising NameError per request.
+    Cached benchmark price fetch so pair_signal doesn't refetch yfinance for
+    every ticker in a screen sweep that shares the same benchmark.
+    """
+    try:
+        from omni.ondemand.lookup import lookup_ticker
+        b = lookup_ticker(bench_ticker, bench_asset_class, display_name=bench_ticker)
+        return b.prices if b is not None else None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"bench prices fetch failed {bench_asset_class}/{bench_ticker}: {exc}")
+        return None
+
+
 def compute_pair_signal(
     stock_card: dict,
     *,
@@ -80,8 +96,9 @@ def compute_pair_signal(
                     sb = lookup_ticker(ticker, asset_class, display_name=ticker)
                     stock_prices = sb.prices if sb else None
                 if bench_prices is None:
-                    bb = lookup_ticker(bench, bench_ac, display_name=bench)
-                    bench_prices = bb.prices if bb else None
+                    # Phase 24 — cached fetch: same benchmark requested
+                    # 100x in a screen sweep should hit memory, not yfinance.
+                    bench_prices = _cached_bench_prices(bench, bench_ac)
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"pair price lookup failed: {exc}")
                 return {}

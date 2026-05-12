@@ -12,6 +12,7 @@ n_folds=4), then uses the LAST fold's calibrator for the live row.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 import math
 
@@ -47,6 +48,14 @@ class PredictionCard:
     reasons: str
     why_text: str
     news_top5: list[dict] = field(default_factory=list)
+    # Phase 24.15 — RAG-grounded citations from the explanation pipeline.
+    # Each entry: {n, ticker, source, date, url, title, score}. Empty when
+    # the deterministic fallback is used (no news, RAG offline, or
+    # validation failed twice). UI renders these as numbered chips below
+    # the why-text.
+    why_citations: list[dict] = field(default_factory=list)
+    why_grounding_score: float = 0.0
+    why_path: str = "deterministic"  # "rag" | "rag_low_grounding" | "deterministic"
     provenance: dict = field(default_factory=dict)
     model_kind: str = "universal_5d"
     deep_analysis_available: bool = True
@@ -117,6 +126,125 @@ def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
     return aligned.to_numpy(dtype=float)
 
 
+# ============================================================================
+# Phase 24 — Tier-1 inference optimizations
+# ----------------------------------------------------------------------------
+# Module-level caches so a multi-ticker screen sweep doesn't re-load the
+# 41 MB stack pickle 100 times. The cache invalidates whenever the universal
+# model's mtime tag changes (same tag we use in the prediction-card cache key).
+# ============================================================================
+
+_MODEL_CACHE: dict[str, tuple[Any, ...]] = {}
+
+
+def _cached_models(mv_tag: str):
+    """Return (universal, stack_record, conformal) loaded once per mv_tag."""
+    if mv_tag in _MODEL_CACHE:
+        return _MODEL_CACHE[mv_tag]
+    universal = None
+    stack_rec = None
+    conformal = None
+    try:
+        universal = model_registry.load()
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"universal load skipped: {e}")
+    try:
+        import pickle
+        from pathlib import Path as _P
+        sp = _P("data") / "models" / "stack_h5.pkl"
+        if sp.exists():
+            with sp.open("rb") as f:
+                sb = pickle.load(f)
+            stack_rec = sb.get("stack")
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"stack load skipped: {e}")
+    try:
+        import joblib as _jl
+        from pathlib import Path as _P
+        cp = _P("data") / "models" / "conformal_h5.joblib"
+        if cp.exists():
+            conformal = _jl.load(cp)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"conformal load skipped: {e}")
+    _MODEL_CACHE.clear()
+    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal)
+    return _MODEL_CACHE[mv_tag]
+
+
+def _score_one(feat_only: pd.DataFrame,
+               *, universal, stack_rec, asset_class: str
+               ) -> tuple[float, str]:
+    """Score a single live-row feature vector through universal/stack/specialist.
+
+    Returns (proba_up, model_kind). Centralizes the alignment so we don't
+    re-reindex/refill for each base learner. If universal is None we return
+    (0.5, 'rubric_only').
+    """
+    if universal is None:
+        return 0.5, "rubric_only"
+
+    X_uni = _align_to_universal(feat_only, universal)
+    proba = float(universal.calibrator.predict_proba(X_uni)[0, 1])
+    kind = "universal_5d"
+
+    # Stack override — share the reindex (most cols overlap with universal)
+    if stack_rec is not None:
+        try:
+            uni_auc = float(universal.oof_auc or 0.5)
+            if stack_rec.oof_meta_auc > uni_auc:
+                Xs = feat_only.reindex(columns=stack_rec.feature_cols)
+                p_stack = float(stack_rec.predict_proba(Xs)[0])
+                proba = p_stack
+                kind = "stack_h5_rank_purged"
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"stack score failed: {exc}")
+
+    # India specialist (lazy load — cheap; cached by specialists module)
+    if asset_class == "india":
+        try:
+            from omni.specialists import india as _ind
+            spec = _ind.load()
+            if spec is not None:
+                Xs = feat_only.reindex(columns=spec.feature_cols)
+                p_spec = float(spec.predict_proba(Xs)[0])
+                if spec.oof_auc > 0.51:
+                    proba = 0.5 * proba + 0.5 * p_spec
+                    kind += "+india"
+                else:
+                    log.info(f"india specialist auc={spec.oof_auc:.3f} <0.51, skipped")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"india specialist score failed: {exc}")
+
+    return proba, kind
+
+
+def predict_batch(items: list[tuple[str, str]],
+                   *, max_workers: int = 8) -> list["PredictionCard | None"]:
+    """Score multiple tickers in one pass. Loads models ONCE, runs feature
+    builds in a thread pool, then scores sequentially against the warm models.
+
+    Args:
+        items: list of (ticker, asset_class) tuples.
+        max_workers: thread-pool size for feature lookups (I/O bound).
+
+    Returns: list of PredictionCard|None aligned with `items`.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Warm the model cache once for the whole batch
+    _ = _cached_models(_model_version_tag())
+
+    def _one(t_ac):
+        try:
+            return predict_ticker(t_ac[0], t_ac[1])
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"batch predict failed for {t_ac}: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        return list(ex.map(_one, items))
+
+
 def _build_card(
     bundle: LookupBundle,
     feats_full: pd.DataFrame,
@@ -148,13 +276,34 @@ def _build_card(
 
     # Pillars come from the rubric output that lives back on `last` after
     # rubric_score_frame side-effected it. We re-run scorer here to capture them.
+    # Phase 24.16 — augment the row with live OI features for India tickers
+    # so the new `oi` pillar has data instead of falling back to neutral 50.
+    feat_row = last.iloc[0].copy()
+    if bundle.asset_class == "india":
+        try:
+            from omni.ingest.sources.nse_oi import oi_features
+            oi_data = oi_features(bundle.ticker)
+            if oi_data.get("has_option_chain"):
+                if "oi_pcr" not in feat_row or pd.isna(feat_row.get("oi_pcr")):
+                    feat_row["oi_pcr"] = float(oi_data.get("oi_pcr", 0))
+                if "max_pain_dist_pct" not in feat_row or pd.isna(feat_row.get("max_pain_dist_pct")):
+                    feat_row["max_pain_dist_pct"] = float(oi_data.get("max_pain_dist_pct", 0))
+                if "oi_total_lakhs" not in feat_row or pd.isna(feat_row.get("oi_total_lakhs")):
+                    feat_row["oi_total_lakhs"] = float(oi_data.get("oi_total_lakhs", 0))
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"OI augmentation skipped for {bundle.ticker}: {exc}")
     from omni.rubric.scorer import score_row
-    rub = score_row(last.iloc[0], regime=regime_label, asset_class=bundle.asset_class)
+    rub = score_row(feat_row, regime=regime_label, asset_class=bundle.asset_class)
     pillars = {
         "technical": float(rub.technical_score),
         "fundamental": float(rub.fundamental_score),
         "sentiment": float(rub.sentiment_score),
         "macro": float(rub.macro_score),
+        "microstructure": float(getattr(rub, "microstructure_score", 50.0)),
+        "oi": float(getattr(rub, "oi_score", 50.0)),
+        "relative_strength": float(getattr(rub, "relative_strength_score", 50.0)),
+        "insider": float(getattr(rub, "insider_score", 50.0)),
+        "earnings_momentum": float(getattr(rub, "earnings_momentum_score", 50.0)),
     }
 
     # Top 5 news headlines for the card
@@ -171,9 +320,11 @@ def _build_card(
             })
 
     # LLM "why" — best-effort
-    why = _explain(bundle, pillars, regime_label, float(proba_up),
-                    direction=int(row.get("direction", 0)),
-                    conviction=float(row.get("conviction", 0.0)))
+    why, why_citations, why_grounding, why_path = _explain(
+        bundle, pillars, regime_label, float(proba_up),
+        direction=int(row.get("direction", 0)),
+        conviction=float(row.get("conviction", 0.0)),
+    )
 
     # ---- expected-move estimate + data coverage ----
     px = bundle.prices
@@ -204,8 +355,11 @@ def _build_card(
             expected_low_pct = float(_lo)
             expected_high_pct = float(_hi)
             _conformal_used = True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # Conformal calibrator is optional; silent fallback to heuristic
+        # was masking real loader bugs. Log at debug so they're discoverable
+        # without spamming production.
+        log.debug("conformal calibrator unavailable, using ±1σ band: %s", exc)
     if not _conformal_used:
         expected_low_pct = float(expected_move_pct - sigma_5d_pct)
         expected_high_pct = float(expected_move_pct + sigma_5d_pct)
@@ -311,6 +465,9 @@ def _build_card(
         reasons=str(row.get("reasons", "")),
         why_text=why,
         news_top5=news_top,
+        why_citations=why_citations,
+        why_grounding_score=why_grounding,
+        why_path=why_path,
         provenance=bundle.provenance.summary(),
         model_kind=model_kind,
         deep_analysis_available=(model_kind == "universal_5d"),
@@ -341,30 +498,77 @@ def _build_card(
     )
 
 
+def _deterministic_why(direction: int, regime: str, pillars: dict,
+                          proba_up: float, conviction: float) -> str:
+    """Fallback explanation when RAG is unavailable or ungrounded.
+
+    Used when:
+      - no news available for the ticker
+      - RAG store unreachable / qdrant import failed
+      - both LLM attempts came back ungrounded (grounding_score < threshold)
+    """
+    label = {1: "LONG", -1: "SHORT", 0: "FLAT"}.get(int(direction), "FLAT")
+    strongest = max(pillars.items(), key=lambda kv: abs(kv[1] - 50))
+    return (f"{label} signal in a {regime} regime. Strongest pillar is "
+             f"{strongest[0]} ({strongest[1]:.0f}/100). Model 5d up-probability "
+             f"is {proba_up:.0%}. Conviction {conviction:.0f}/100.")
+
+
 def _explain(bundle: LookupBundle, pillars: dict, regime: str,
-             proba_up: float, *, direction: int, conviction: float) -> str:
-    label = {1: "LONG", -1: "SHORT", 0: "FLAT"}.get(direction, "FLAT")
-    prompt = (
-        f"Stock: {bundle.display_name} ({bundle.ticker}, {bundle.asset_class.upper()})\n"
-        f"Today: regime={regime}, model proba(up,5d)={proba_up:.3f}, "
-        f"rubric pillars: tech={pillars['technical']:.0f}, "
-        f"fund={pillars['fundamental']:.0f}, sent={pillars['sentiment']:.0f}, "
-        f"macro={pillars['macro']:.0f}. "
-        f"Final signal: {label} (conviction {conviction:.0f}/100).\n\n"
-        f"Write 3-4 sentences (max 80 words) explaining WHY this signal "
-        f"is what it is, in plain language, citing the strongest pillar "
-        f"and the regime. No financial advice disclaimer."
-    )
+              proba_up: float, *, direction: int, conviction: float,
+              ) -> tuple[str, list[dict], float, str]:
+    """Generate a why-text. Returns (text, citations, grounding_score, path).
+
+    Phase 24.15 — wired through the RAG pipeline:
+      1. Idempotently ingest bundle.news_raw into the local Qdrant store
+      2. Retrieve top-5 most relevant chunks (BM25 + dense + reranker)
+      3. Generate via signal_explanation_rag task chain
+      4. Validate (citations, numeric grounding, sentence-cosine score)
+      5. On any failure path: drop to deterministic explanation
+
+    The path string indicates which branch executed for the UI to surface
+    a small "rag-grounded" / "fallback" badge.
+    """
+    deterministic = _deterministic_why(direction, regime, pillars, proba_up, conviction)
+
+    has_news = (bundle.news_raw is not None
+                 and not bundle.news_raw.empty)
+    if not has_news:
+        return deterministic, [], 0.0, "deterministic"
+
+    # Try the RAG path. Any exception falls through to deterministic.
     try:
-        res = _llm_route("signal_explanation", prompt)
-        return (res.text if hasattr(res, "text") else str(res)).strip()
-    except (BackendError, Exception) as e:
-        log.debug(f"LLM explain skipped: {e}")
-        # Deterministic fallback
-        strongest = max(pillars.items(), key=lambda kv: abs(kv[1] - 50))
-        return (f"{label} signal in a {regime} regime. Strongest pillar is "
-                 f"{strongest[0]} ({strongest[1]:.0f}/100). Model 5d up-probability "
-                 f"is {proba_up:.0%}. Conviction {conviction:.0f}/100.")
+        from omni.llm.rag.pipeline import get_pipeline
+        pipe = get_pipeline()
+        # Idempotent ingest — if we've seen these articles before, this is
+        # a fast no-op (cached embeddings + identical chunk ids)
+        pipe.ingest_news_for_ticker(
+            bundle.news_raw, ticker=bundle.ticker,
+            asset_class=bundle.asset_class,
+        )
+        resp = pipe.explain_signal(
+            ticker=bundle.ticker,
+            display_name=bundle.display_name,
+            asset_class=bundle.asset_class,
+            regime=regime,
+            pillars=pillars,
+            proba_up=float(proba_up),
+            direction=int(direction),
+            conviction=float(conviction),
+        )
+        if resp.is_safe and resp.text:
+            return (resp.text, resp.citations, resp.grounding_score, "rag")
+        if resp.text and resp.fallback_used == "low_grounding":
+            # Keep the grounded-ish output but tag it so UI can warn
+            return (resp.text, resp.citations, resp.grounding_score,
+                     "rag_low_grounding")
+        # Any other failure: fall back to deterministic
+        log.debug("rag explain fell back: %s; issues=%s",
+                   resp.fallback_used, resp.issues)
+    except Exception as e:  # noqa: BLE001
+        log.debug("rag pipeline error, using deterministic: %s", e)
+
+    return deterministic, [], 0.0, "deterministic"
 
 
 # ---------- public entry points ----------
@@ -379,8 +583,11 @@ def _model_version_tag() -> str:
         blob, _ = model_registry._paths_for(5)
         if blob.exists():
             return f"v{int(blob.stat().st_mtime)}"
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # Model registry path discovery shouldn't normally fail; log at
+        # debug so a missing _paths_for surface (e.g. registry rewrite)
+        # is investigable instead of silently re-using "v0" forever.
+        log.debug("model_version_tag fallback to v0: %s", exc)
     return "v0"
 
 
@@ -413,67 +620,21 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
         log.warning(f"predict: no features for {asset_class}/{ticker}")
         return None
 
-    try:
-        um = model_registry.load()
-    except FileNotFoundError as e:
-        log.warning(f"universal model missing: {e}")
-        # Fall back to a deterministic 0.5 proba rather than crashing.
-        proba = 0.5
-        kind = "rubric_only"
-        per_horizon: dict[int, float] = {}
-    else:
-        # Pull the last row's features
-        from omni.models.xgboost_5d import _DROP_ALWAYS
-        from omni.features.build import is_target_col
-        last = feats.tail(1)
-        feat_only = last[[c for c in last.columns
-                           if c not in _DROP_ALWAYS and not is_target_col(c)]]
-        feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
-        X = _align_to_universal(feat_only, um)
-        proba = float(um.calibrator.predict_proba(X)[0, 1])
-        kind = "universal_5d"
+    # Phase 24 — single feature alignment, shared across all model paths.
+    from omni.models.xgboost_5d import _DROP_ALWAYS
+    from omni.features.build import is_target_col
+    last = feats.tail(1)
+    feat_only = last[[c for c in last.columns
+                       if c not in _DROP_ALWAYS and not is_target_col(c)]]
+    feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
 
-        # ---- Stacked-ensemble override (stack_h5.pkl) ----
-        # When data/models/stack_h5.pkl exists and its meta-AUC beats the
-        # universal's OOF AUC, use the stack instead. The stack was trained
-        # on the rank target with purged K-fold + embargo (de Prado).
-        try:
-            import pickle
-            from pathlib import Path
-            stack_path = Path("data/models/stack_h5.pkl")
-            if stack_path.exists():
-                with stack_path.open("rb") as f:
-                    sb = pickle.load(f)
-                sr = sb.get("stack")
-                if sr is not None and sr.oof_meta_auc > (um.oof_auc or 0.5):
-                    Xs = feat_only.reindex(columns=sr.feature_cols)
-                    p_stack = float(sr.predict_proba(Xs)[0])
-                    proba = p_stack
-                    kind = "stack_h5_rank_purged"
-        except Exception as exc:  # noqa: BLE001
-            log.warning(f"stack override predict failed: {exc}")
+    universal, stack_rec, _conformal = _cached_models(_model_version_tag())
+    proba, kind = _score_one(feat_only, universal=universal,
+                              stack_rec=stack_rec, asset_class=asset_class)
 
-        # ---- India specialist blend (only for india tickers) ----
-        if asset_class == "india":
-            try:
-                from omni.specialists import india as _ind
-                spec = _ind.load()
-                if spec is not None:
-                    Xs = feat_only.reindex(columns=spec.feature_cols)
-                    p_spec = float(spec.predict_proba(Xs)[0])
-                    # Blend: 50/50 with universal, but only if specialist OOF AUC > 0.51
-                    if spec.oof_auc > 0.51:
-                        proba = 0.5 * proba + 0.5 * p_spec
-                        kind = "universal+india_specialist"
-                    else:
-                        # Specialist underperforms — keep universal but log
-                        log.info(f"india specialist auc={spec.oof_auc:.3f} below 0.51, not blended")
-            except Exception as exc:  # noqa: BLE001
-                log.warning(f"india specialist predict failed: {exc}")
-
-        # Multi-horizon: try to load 1d / 21d models too. Each computes its
-        # own X alignment because feature_cols may differ per horizon.
-        per_horizon = {5: proba}
+    # Multi-horizon predictions reuse the same feat_only frame.
+    per_horizon: dict[int, float] = {5: proba}
+    if universal is not None:
         for h in (1, 21):
             try:
                 um_h = model_registry.load_horizon(h)
@@ -488,7 +649,7 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                 log.warning(f"horizon model h={h} predict failed: {exc}")
 
     card = _build_card(bundle, feats, proba, model_kind=kind,
-                        per_horizon_proba=per_horizon if 'per_horizon' in locals() else None)
+                        per_horizon_proba=per_horizon)
 
     # ---- Pair / cross-asset signal (Part B) ----
     try:
@@ -575,8 +736,10 @@ def deep_analysis(ticker: str, asset_class: str,
         try:
             if len(set(f.y_true)) == 2:
                 fold_aucs.append(float(roc_auc_score(f.y_true, f.proba)))
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # Single-class fold or sklearn version issue — skip but log
+            # so a regression in the metric pipeline isn't silent.
+            log.debug("deep_analysis: skip fold AUC: %s", exc)
 
     card = _build_card(bundle, full, proba,
                        model_kind="walk_forward_per_ticker", fold_aucs=fold_aucs)

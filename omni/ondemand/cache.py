@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -72,9 +73,19 @@ def cached(*, ttl: int, key: str) -> Callable:
 
     `key` is a str.format template referencing the function's bound
     arguments by name. e.g. key="prices:{asset_class}:{ticker}".
+
+    Phase 24.16 — adds in-process singleflight: if two threads call this
+    decorated function concurrently with the same key, only one runs the
+    underlying function; the other waits for and reuses the result.
+    Eliminates duplicate yfinance fetches when the portfolio tab fans out
+    or when two users hit the same ticker simultaneously.
     """
     def deco(fn: Callable) -> Callable:
         sig = inspect.signature(fn)
+        # Per-decorated-function inflight registry. We key by the cache
+        # key string so unrelated callers never block each other.
+        _inflight: dict[str, "_InflightSlot"] = {}
+        _inflight_lock = threading.Lock()
 
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -88,16 +99,58 @@ def cached(*, ttl: int, key: str) -> Callable:
             hit = cache.get(k, default=_MISS)
             if hit is not _MISS:
                 return hit
-            out = fn(*args, **kwargs)
+            # ---- singleflight: claim or wait on an inflight slot --------
+            with _inflight_lock:
+                slot = _inflight.get(k)
+                if slot is None:
+                    slot = _InflightSlot()
+                    slot.owner = True  # this thread owns the call
+                    _inflight[k] = slot
+                else:
+                    slot.owner = False
+            if not slot.owner:
+                # Another thread is already running fn(...) for this key.
+                # Wait for it; on completion either re-read the cache or
+                # use the result the owner stashed on the slot.
+                slot.event.wait(timeout=120)
+                if slot.error is not None:
+                    raise slot.error
+                if slot.value is not _MISS:
+                    return slot.value
+                hit = cache.get(k, default=_MISS)
+                if hit is not _MISS:
+                    return hit
+                # Owner finished without storing — fall through to compute
+            # ---- this thread is the owner: actually compute -------------
             try:
-                cache.set(k, out, expire=ttl)
-            except Exception:
-                pass  # cache write failures are non-fatal
-            return out
+                out = fn(*args, **kwargs)
+                slot.value = out
+                try:
+                    cache.set(k, out, expire=ttl)
+                except Exception:
+                    pass  # cache write failures are non-fatal
+                return out
+            except Exception as e:  # noqa: BLE001
+                slot.error = e
+                raise
+            finally:
+                slot.event.set()
+                with _inflight_lock:
+                    _inflight.pop(k, None)
 
         wrapper.cache_key_template = key  # type: ignore[attr-defined]
         return wrapper
     return deco
+
+
+class _InflightSlot:
+    __slots__ = ("event", "owner", "value", "error")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.owner = False
+        self.value: Any = _MISS
+        self.error: BaseException | None = None
 
 
 _MISS = object()
