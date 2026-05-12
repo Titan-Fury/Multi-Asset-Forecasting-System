@@ -33,7 +33,9 @@ except Exception:  # pragma: no cover
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/embeddings"
 MODEL = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
-EMBED_DIM = 1024
+# Phase 24.15 — Nemotron VL 1B v2 returns 2048-d as of mid-2026 (model
+# update; was 1024 earlier). Verified empirically via /v1/embeddings.
+EMBED_DIM = 2048
 
 
 def is_zero(vec: np.ndarray) -> bool:

@@ -1,0 +1,70 @@
+# Production Qdrant deployment for Omni_Stocks (Phase 24.16).
+#
+# Replaces the in-process `qdrant-client` local mode (writes to
+# data/rag/qdrant/) with a real Qdrant server. This is the auditor's
+# "plan for it now" — by the time you have 5M chunks, you don't want a
+# forced-migration day.
+#
+# Why this matters:
+#   - local mode is single-process, single-machine, file-locked.
+#     Restart latency grows with collection size.
+#   - the server has WAL, replication-ready storage, and a REST API
+#     (in case any future service wants to query the same vectors).
+#
+# Usage:
+#   1) docker compose -f deploy/docker-compose.qdrant.yml up -d
+#   2) export OMNI_QDRANT_URL=http://127.0.0.1:6333
+#   3) restart the API / Streamlit; the store wrapper picks it up.
+#
+# To migrate existing local-mode data:
+#   python -m omni.llm.rag.migrate_local_to_server \
+#       --src data/rag/qdrant --dst http://127.0.0.1:6333
+#   (write that script when you actually do the migration; it's a few
+#    lines using qdrant-client snapshot/restore.)
+#
+# Production hardening checklist before you flip the switch:
+#   [ ] enable Qdrant API key (QDRANT__SERVICE__API_KEY)
+#   [ ] put it behind nginx/Caddy with TLS
+#   [ ] mount the storage volume on a separate disk (vector data is
+#       chunky; you don't want it competing with the OS volume)
+#   [ ] set up a backup cron (qdrant has built-in snapshot endpoints)
+#   [ ] expose only the read-only endpoints to the API service if you
+#       have a separate ingestion process
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.0
+    container_name: omni-qdrant
+    restart: unless-stopped
+    ports:
+      # 6333 = HTTP API, 6334 = gRPC
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    environment:
+      # Tighten log noise, raise the default search limit
+      QDRANT__LOG_LEVEL: INFO
+      QDRANT__SERVICE__MAX_REQUEST_SIZE_MB: 64
+      # Enable on-disk vectors when collections grow beyond memory.
+      # Trades a little latency for a lot of RAM headroom.
+      QDRANT__STORAGE__OPTIMIZERS__INDEXING_THRESHOLD: 20000
+      # Uncomment + set in production:
+      # QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider",
+             "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          # Adjust based on collection size. ~4GB headroom is enough for
+          # ~5M-10M 1024-dim vectors with on-disk storage.
+          memory: 4G
+
+volumes:
+  qdrant-storage:
+    driver: local

@@ -164,6 +164,32 @@ tasks:
     fallback: [groq_llama70b, openrouter_minimax_paid, gemini_flash, ollama_qwen, openrouter_gemma, cortex_claude]
     cache_ttl_days: 1
 
+  # Phase 24.15 — RAG-grounded signal explanation. Same backend chain but
+  # called by omni.llm.rag.pipeline.RAGPipeline which retrieves news from
+  # the local Qdrant store, builds a citation-enforcing prompt, and runs
+  # the output through the anti-hallucination validator.
+  # Tunables consumed by RAGPipeline:
+  #   rag.retrieval.doc_types       which Qdrant collections to search
+  #   rag.retrieval.date_window_days  recency filter (-N days .. today)
+  #   rag.retrieval.top_k           number of chunks fed to the LLM
+  #   rag.validators.grounding_min  sentence-cosine threshold for is_safe
+  signal_explanation_rag:
+    primary: [cortex_claude]
+    fallback: [groq_llama70b, gemini_flash, openrouter_minimax_free, ollama_qwen]
+    cache_ttl_days: 1
+    cost_class: paid
+    rag:
+      embedder: nemotron
+      reranker: bge-reranker-base
+      retrieval:
+        doc_types: [news]
+        date_window_days: 14
+        top_k: 5
+      validators:
+        grounding_min: 0.55
+        require_citations: true
+        strip_unsupported_numbers: true
+
   cross_validation:
     primary: [gemini_flash]
     fallback: [groq_llama70b, openrouter_llama70b, openrouter_gemma, ollama_qwen]

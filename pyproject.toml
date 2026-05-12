@@ -54,6 +54,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# API service (FastAPI extraction — Phase 24.16). Install with
+#   pip install -e ".[api]"
+# when you want to run `python -m omni.api.serve` or scrape /metrics/prom.
+api = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "prometheus-client>=0.20",
+]
+# RAG layer dependencies. Install with
+#   pip install -e ".[rag]"
+rag = [
+    "qdrant-client>=1.11",
+    "sentence-transformers>=3.0",
+    "rank-bm25>=0.2.2",
+]
 dev = [
     "pytest>=8.2",
     "pytest-cov>=5.0",

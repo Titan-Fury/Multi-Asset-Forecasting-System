@@ -54,14 +54,18 @@ def _load_or_embed(ticker: str, day: pd.Timestamp,
     if path.exists():
         try:
             return np.load(path)
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Corrupt cache file (rare): partial write, version mismatch,
+            # or disk error. Recompute below; cache will be replaced.
             pass
     text = " | ".join(headlines[:8])  # cap at 8 headlines per day
     vec = nemotron_embed([text])[0]
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         np.save(path, vec.astype(np.float32))
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Cache write failure is non-fatal — we still return the vector
+        # we just computed. Common cause: read-only mount, full disk.
         pass
     return vec
 
