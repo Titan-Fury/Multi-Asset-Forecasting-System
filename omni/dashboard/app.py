@@ -28,18 +28,26 @@ from __future__ import annotations
 import sys as _sys
 from pathlib import Path as _Path
 _here = _Path(__file__).resolve()
-for _candidate in (_here.parent, *_here.parents):
+_root = None
+# Phase 24.13 — was `(_here.parent, *_here.parents)` which duplicates the
+# first element (parents[0] IS parent). And without `_root = None` first,
+# a `del _root` on a copied app.py outside the omni tree would NameError.
+for _candidate in _here.parents:
     if (_candidate / "omni" / "__init__.py").exists():
         _root = str(_candidate)
         if _root not in _sys.path:
             _sys.path.insert(0, _root)
         break
-del _sys, _Path, _here, _candidate
+del _sys, _Path, _here, _candidate, _root
 
 from datetime import datetime, timezone
+import logging
 
 import pandas as pd
 import streamlit as st
+from html import escape as _esc
+
+_log = logging.getLogger("omni.dashboard")
 
 from omni.dashboard import cache as _c
 from omni.dashboard import components as _u
@@ -54,13 +62,48 @@ def _theme_override(choice: str) -> None:
     Phase 24.7 — overrides the new `--theme-c{1..4}`, `--theme-bg-stop{1..3}`,
     `--theme-accent{,-2,-3}` vars used by the Phase 23.5 aurora mesh, so the
     user's pick actually changes the visual theme end-to-end.
+
+    Phase 24.16 — additionally overrides the BASE surface/text/border tokens
+    (--surface-0/1/2, --text-primary/secondary/muted, --border-subtle/strong)
+    so Light theme actually produces a light page. Previously the picker only
+    swapped the aurora background; everything else stayed dark because the
+    base CSS keys those tokens off `@media (prefers-color-scheme: dark)` which
+    follows the OS, not the user's in-app choice. We force the tokens with
+    !important on `html`/`body`/`.stApp` to beat the media query.
     """
+    # ------------------------------------------------------------------ tokens
+    DARK_BASE = {
+        "--surface-0": "#0a0e1a",
+        "--surface-1": "#11172a",
+        "--surface-2": "#182037",
+        "--border-subtle": "rgba(148, 163, 184, 0.10)",
+        "--border-strong": "rgba(148, 163, 184, 0.22)",
+        "--text-primary": "#e6ecf5",
+        "--text-secondary": "#94a3b8",
+        "--text-muted": "#64748b",
+        "--kpi-positive": "#34d399",
+        "--kpi-negative": "#f87171",
+    }
+    LIGHT_BASE = {
+        "--surface-0": "#f8fafc",
+        "--surface-1": "#ffffff",
+        "--surface-2": "#f1f5f9",
+        "--border-subtle": "rgba(15, 23, 42, 0.10)",
+        "--border-strong": "rgba(15, 23, 42, 0.20)",
+        "--text-primary": "#0f172a",
+        "--text-secondary": "#334155",
+        "--text-muted": "#64748b",
+        "--kpi-positive": "#059669",
+        "--kpi-negative": "#dc2626",
+    }
+
     # Each theme is a tuple of CSS variable assignments
     THEMES: dict[str, dict[str, str]] = {
         # Default cosmic dark — keep as-is so "Auto" matches the baseline
         "Auto": {},
         # Pure dark — minimal aurora, near-black, cool blue accent
         "Dark": {
+            **DARK_BASE,
             "--theme-c1": "oklch(0.30 0.10 240 / 0.45)",
             "--theme-c2": "oklch(0.30 0.10 220 / 0.35)",
             "--theme-c3": "oklch(0.28 0.08 200 / 0.30)",
@@ -75,6 +118,7 @@ def _theme_override(choice: str) -> None:
         },
         # Light — clean, nearly white, slate text
         "Light": {
+            **LIGHT_BASE,
             "--theme-c1": "oklch(0.95 0.05 240 / 0.55)",
             "--theme-c2": "oklch(0.94 0.06 280 / 0.45)",
             "--theme-c3": "oklch(0.96 0.04 200 / 0.40)",
@@ -89,6 +133,7 @@ def _theme_override(choice: str) -> None:
         },
         # Cyberpunk — hot magenta + neon cyan + acid yellow over near-black
         "Cyberpunk": {
+            **DARK_BASE,
             "--theme-c1": "oklch(0.55 0.30 340 / 0.70)",  # magenta/pink
             "--theme-c2": "oklch(0.65 0.25 200 / 0.60)",  # neon cyan
             "--theme-c3": "oklch(0.70 0.25 90 / 0.45)",   # acid yellow
@@ -103,6 +148,7 @@ def _theme_override(choice: str) -> None:
         },
         # Synthwave — purple/pink/teal sunset, retro feel
         "Synthwave": {
+            **DARK_BASE,
             "--theme-c1": "oklch(0.50 0.25 320 / 0.65)",
             "--theme-c2": "oklch(0.55 0.22 30 / 0.55)",
             "--theme-c3": "oklch(0.55 0.20 200 / 0.45)",
@@ -117,6 +163,7 @@ def _theme_override(choice: str) -> None:
         },
         # Matrix — pure green-on-black hacker terminal
         "Matrix": {
+            **DARK_BASE,
             "--theme-c1": "oklch(0.55 0.20 145 / 0.50)",
             "--theme-c2": "oklch(0.50 0.22 140 / 0.40)",
             "--theme-c3": "oklch(0.45 0.18 150 / 0.35)",
@@ -131,6 +178,7 @@ def _theme_override(choice: str) -> None:
         },
         # Nord — calm muted polar palette
         "Nord": {
+            **DARK_BASE,
             "--theme-c1": "oklch(0.50 0.10 240 / 0.50)",
             "--theme-c2": "oklch(0.55 0.10 200 / 0.40)",
             "--theme-c3": "oklch(0.50 0.08 220 / 0.35)",
@@ -178,24 +226,68 @@ def _theme_override(choice: str) -> None:
         }
         """
     elif choice == "Light":
+        # Phase 24.16 — Light needs full surface inversion. Beat the
+        # `_ULTRA_FX_CSS` aurora gradient with !important and re-key all
+        # hard-coded dark colour-mix() values that show up in stMetric tiles.
         extras = """
-        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #0f172a !important; text-shadow: none; }
-        [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: rgba(15,23,42,0.6) !important; }
-        [data-testid="stMetric"] {
-          background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(248,250,252,0.95)) !important;
-          border-color: rgba(15,23,42,0.10) !important;
+        html, body, .stApp, [data-testid="stAppViewContainer"] {
+          color: #0f172a !important;
         }
-        body, .stApp { color: #0f172a; }
+        /* Aurora mesh — light-mode override of the dark gradient stack */
+        html, body, .stApp, [data-testid="stAppViewContainer"] {
+          background:
+            radial-gradient(at 20% 12%, rgba(125, 211, 252, 0.20) 0%, transparent 55%),
+            radial-gradient(at 80% 18%, rgba(196, 181, 253, 0.18) 0%, transparent 55%),
+            radial-gradient(at 65% 85%, rgba(165, 243, 252, 0.15) 0%, transparent 55%),
+            linear-gradient(180deg, #f8fafc 0%, #eef2f7 50%, #f1f5f9 100%) !important;
+        }
+        section[data-testid="stSidebar"] {
+          background: #ffffff !important;
+          border-right: 1px solid rgba(15,23,42,0.08) !important;
+        }
+        section[data-testid="stSidebar"] * { color: #0f172a !important; }
+        [data-testid="stMetric"] {
+          background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248,250,252,0.95)) !important;
+          border-color: rgba(15,23,42,0.10) !important;
+          color: #0f172a !important;
+        }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #0f172a !important; text-shadow: none !important; }
+        [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: rgba(15,23,42,0.6) !important; }
+        .signal-card { background: #ffffff !important; border-color: rgba(15,23,42,0.08) !important; color: #0f172a !important; }
+        .stat, .stat-value, .stat-label, .stat-delta, .meta { color: #0f172a !important; }
+        .stat-label, .stat-delta, .meta { color: rgba(15,23,42,0.6) !important; }
+        /* baseweb selectbox menu */
+        [data-baseweb="popover"] [role="listbox"] { background: #ffffff !important; color: #0f172a !important; }
         """
 
+    # Wrap in :root + html + body selectors to ensure tokens beat the
+    # `@media (prefers-color-scheme: dark)` block in _CSS. We append
+    # `!important` to each CSS-variable assignment via an inline rewrite.
+    forced = "; ".join(f"{k}: {v} !important" for k, v in THEMES[choice].items())
+    # Sync the base `--accent` (used by buttons, sliders, focus rings) with
+    # the picked theme's `--theme-accent`, so a Cyberpunk pick actually shows
+    # magenta buttons rather than cyan ones.
+    accent = THEMES[choice].get("--theme-accent")
+    accent_strong = THEMES[choice].get("--theme-accent-2", accent)
+    if accent:
+        forced += f"; --accent: {accent} !important; --accent-strong: {accent_strong} !important"
+
     st.markdown(
-        f"<style>:root {{ {css_vars} }} {extras}</style>",
+        f"<style>"
+        f":root, html, body, .stApp {{ {forced} }}"
+        f"{extras}"
+        f"</style>",
         unsafe_allow_html=True,
     )
 
 
 def _suggest_options(query: str) -> list[str]:
-    """Return labels for the autocomplete: 'TICKER · EXCH · Display name'.
+    """Return labels for the autocomplete: 'TICKER  —  Display name'.
+
+    Phase 24.16 — dropped the middle-dot `·` separator and the redundant
+    exchange tag. The ticker suffix (.NS, -USD, etc.) already encodes the
+    venue, and the dot rendered as garbage on some Windows fonts. Now uses
+    a single em-dash separator and a left-aligned two-column layout.
 
     Uses multi-source live search (Yahoo + NSE + CoinGecko) when query is
     long enough; falls back to curated list for empty / very-short queries.
@@ -203,21 +295,21 @@ def _suggest_options(query: str) -> list[str]:
     sugs = suggestions(query or "", k=15)
     out = []
     for s in sugs:
-        # Exchange tag: try to derive from asset_class
-        exch_tag = {
-            "india": "NSE", "us": "US", "crypto": "CRYPTO",
-            "fx": "FX", "etf": "ETF", "index": "IDX",
-        }.get(s.asset_class, s.asset_class.upper())
         # Trim long names
-        name = s.display_name[:55] + "…" if len(s.display_name) > 55 else s.display_name
-        out.append(f"{s.ticker:<14}  ·  {exch_tag:<6}  ·  {name}")
+        name = s.display_name[:60] + "…" if len(s.display_name) > 60 else s.display_name
+        # Two-column layout: ticker pad-right to 16 chars, em dash, name.
+        out.append(f"{s.ticker:<16}  —  {name}")
     return out
 
 
 def _parse_label(label: str) -> str:
-    """Extract the ticker from a 'TICKER · EXCH · name' label, or return as-is."""
-    if "·" in label:
-        return label.split("·", 1)[0].strip()
+    """Extract the ticker from a 'TICKER  —  name' label, or return as-is.
+    Tolerates the legacy '·' separator for any cached labels still in
+    session_state from the pre-24.16 format.
+    """
+    sep = "—" if "—" in label else ("·" if "·" in label else "")
+    if sep:
+        return label.split(sep, 1)[0].strip()
     return label.strip()
 
 
@@ -243,7 +335,7 @@ def _render_history_pills(entries: list[dict], *, prefix: str,
             arrow = arrow_map.get(ld, "·") if ld is not None else "·"
             cnt = f"  ×{e.get('hit_count', 1)}" if show_count else ""
             label = f"{arrow} {tk}{cnt}"
-            if st.button(label, key=f"sh_{prefix}_{i}", width='stretch',
+            if st.button(label, key=f"sh_{prefix}_{i}", use_container_width=True,
                             help=(
                                 f"{e.get('display_name', tk)}\n"
                                 f"asset: {ac}  ·  exchange: {e.get('exchange') or '?'}\n"
@@ -257,7 +349,7 @@ def _render_history_pills(entries: list[dict], *, prefix: str,
                             )):
                 exch = exch_map.get(ac, "?")
                 st.session_state["predict_ticker_select"] = (
-                    f"{tk:<14}  ·  {exch:<6}  ·  {e.get('display_name', tk)}"
+                    f"{tk:<16}  —  {e.get('display_name', tk)}"
                 )
                 st.rerun()
 
@@ -286,9 +378,9 @@ def _render_watchlist_tab() -> None:
 
     cols = st.columns([3, 1, 1])
     cols[0].markdown(f"**{len(favs)} ticker{'s' if len(favs) != 1 else ''} on your watchlist**")
-    if cols[1].button("Refresh all", width='stretch', key="wl_refresh"):
+    if cols[1].button("Refresh all", use_container_width=True, key="wl_refresh"):
         st.session_state["_wl_refresh_nonce"] = st.session_state.get("_wl_refresh_nonce", 0) + 1
-    if cols[2].button("Clear all", width='stretch', key="wl_clear"):
+    if cols[2].button("Clear all", use_container_width=True, key="wl_clear"):
         n = _wl.clear_all()
         st.warning(f"Removed {n} ticker(s).")
         st.rerun()
@@ -337,7 +429,7 @@ def _render_watchlist_tab() -> None:
             })
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, width='stretch', hide_index=True)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
     # Per-ticker remove buttons
     st.markdown("##### Manage")
@@ -345,7 +437,7 @@ def _render_watchlist_tab() -> None:
     for i, fav in enumerate(favs):
         with rcols[i % len(rcols)]:
             if st.button(f"× {fav['ticker']}", key=f"wl_rm_{fav['ticker']}",
-                          width='stretch'):
+                          use_container_width=True):
                 _wl.remove_favorite(fav["ticker"])
                 st.rerun()
 
@@ -394,10 +486,10 @@ def _render_movers_tab() -> None:
     cg, cl = st.columns(2)
     with cg:
         st.markdown(f"### Top {len(gainers)} gainers")
-        st.dataframe(g_show, width='stretch', hide_index=True)
+        st.dataframe(g_show, use_container_width=True, hide_index=True)
     with cl:
         st.markdown(f"### Top {len(losers)} losers")
-        st.dataframe(l_show, width='stretch', hide_index=True)
+        st.dataframe(l_show, use_container_width=True, hide_index=True)
 
 
 def _build_tracked_universe(*, include_history: bool = True,
@@ -429,15 +521,19 @@ def _build_tracked_universe(*, include_history: bool = True,
     return universe
 
 
-def _record_and_update_lru(res: Resolution, card) -> None:
+def _record_and_update_lru(res: Resolution, card_or_dict) -> None:
     """Persist the search to history.json + update the in-session LRU pills.
     Idempotent — safe to call after every successful prediction.
     Also fires a Streamlit toast (UI7) for live feedback.
+
+    Phase 24.16 — accepts either a PredictionCard object (legacy in-process
+    path) or a dict (FastAPI client path). Treats both the same.
     """
     from omni.dashboard import searchhistory as _sh
 
-    if card is not None:
-        d = card.to_dict()
+    if card_or_dict is not None:
+        d = card_or_dict.to_dict() if hasattr(card_or_dict, "to_dict") \
+            else dict(card_or_dict)
         _sh.record_search(
             res.ticker, res.asset_class,
             display_name=res.display_name,
@@ -453,7 +549,7 @@ def _record_and_update_lru(res: Resolution, card) -> None:
             icon = "🟢" if conv >= 70 else ("🟡" if conv >= 40 else "⚪")
             st.toast(f"{res.ticker}: {dir_label} · conviction {conv:.0f}/100", icon=icon)
         except Exception:
-            pass
+            _log.debug("toast failed", exc_info=True)
     rec_list = st.session_state.get("_recent_tickers", [])
     rec_list = [r for r in rec_list if r.get("ticker") != res.ticker]
     rec_list.insert(0, {"ticker": res.ticker, "ac": res.asset_class,
@@ -530,7 +626,16 @@ def _render_portfolio_tab() -> None:
             futures = {ex.submit(_score_one, tk, ac, dn): tk
                         for tk, ac, dn in universe}
             for fut in as_completed(futures):
-                r = fut.result()
+                # Phase 24.13 — bound per-ticker latency. Without this a
+                # single hung yfinance call would block the whole portfolio
+                # tab. 60s is generous; predict_ticker has its own internal
+                # timeouts so this is a safety net.
+                try:
+                    r = fut.result(timeout=60)
+                except Exception as _e:
+                    tk_hung = futures.get(fut, "?")
+                    _log.warning("portfolio: %s timed out / failed: %s", tk_hung, _e)
+                    r = {"_err": f"{tk_hung}: timed out (>60s)"}
                 if r is None:
                     pass
                 elif "_err" in r:
@@ -540,6 +645,7 @@ def _render_portfolio_tab() -> None:
                 completed += 1
                 progress.progress(completed / n)
     except Exception:
+        _log.warning("portfolio threadpool failed; falling back to serial", exc_info=True)
         # Serial fallback for environments where threading misbehaves
         rows = []
         for i, (tk, ac, dn) in enumerate(universe):
@@ -563,7 +669,7 @@ def _render_portfolio_tab() -> None:
             f"gate today. Lower the slider or wait for the next regime."
         )
         st.dataframe(pf.sort_values("conviction", ascending=False),
-                      width='stretch', hide_index=True)
+                      use_container_width=True, hide_index=True)
         return
 
     # Per-sector cap (proxy: asset_class until we have a sector field)
@@ -603,7 +709,7 @@ def _render_portfolio_tab() -> None:
         in_book[["ticker", "name", "side", "conviction", "blended_p",
                   "regime", "expected_high_pct", "expected_low_pct",
                   "kelly_edge", "allocated_pct"]],
-        width='stretch', hide_index=True,
+        use_container_width=True, hide_index=True,
     )
 
     with st.expander("Below conviction gate (not in book)"):
@@ -612,7 +718,7 @@ def _render_portfolio_tab() -> None:
         if rest.empty:
             st.caption("none")
         else:
-            st.dataframe(rest, width='stretch', hide_index=True)
+            st.dataframe(rest, use_container_width=True, hide_index=True)
 
 
 def _render_replay_section() -> None:
@@ -668,7 +774,7 @@ def _render_replay_section() -> None:
               "regime", "realised_ret", "hit"]]
         .sort_values("asof", ascending=False)
         .head(300),
-        width='stretch', hide_index=True,
+        use_container_width=True, hide_index=True,
     )
 
 
@@ -706,9 +812,17 @@ def _render_earnings_tab() -> None:
                     futures = [ex.submit(_safe_next, tk, ac)
                                 for tk, ac, _ in universe]
                     for fut in as_completed(futures):
-                        tk, ac, ed = fut.result()
+                        # Phase 24.13 — bounded result wait; same rationale
+                        # as portfolio. Earnings calls hit yfinance.calendar
+                        # which is more flaky than fast_info.
+                        try:
+                            tk, ac, ed = fut.result(timeout=30)
+                        except Exception as _e:
+                            _log.warning("earnings future timed out: %s", _e)
+                            continue
                         ed_map[(tk, ac)] = ed
             except Exception:
+                _log.warning("earnings threadpool failed; falling back to serial", exc_info=True)
                 # Fallback to serial (some Streamlit-on-Windows envs misbehave)
                 for tk, ac, _ in universe:
                     _, _, ed = _safe_next(tk, ac)
@@ -729,7 +843,7 @@ def _render_earnings_tab() -> None:
     if rows:
         st.markdown("#### Reporting next 7 days")
         st.dataframe(pd.DataFrame(rows).sort_values("days_until"),
-                      width='stretch', hide_index=True)
+                      use_container_width=True, hide_index=True)
     else:
         st.info("No tracked tickers reporting in the next 7 days.")
 
@@ -758,7 +872,7 @@ def _render_earnings_tab() -> None:
         if hist is None or hist.empty:
             st.info("No historical earnings rows available.")
         else:
-            st.dataframe(hist.head(8), width='stretch', hide_index=True)
+            st.dataframe(hist.head(8), use_container_width=True, hide_index=True)
             if "surprise_pct" in hist.columns:
                 avg = hist["surprise_pct"].dropna().mean()
                 st.metric("Avg surprise (last 4 quarters)",
@@ -771,21 +885,87 @@ def _render_dev_tab() -> None:
 
     All actions are isolated and idempotent. Long-running jobs (model retrain)
     show a spinner; short ones return immediately. Cache stats are read live.
+
+    Phase 24.14 — gated behind a password. Set OMNI_DEV_PASSWORD in `.env`.
+    Without that env var the tab is locked and shows an explanatory message.
     """
+    import hmac
     import os
     import subprocess
+    import sys
     import time as _time
     from pathlib import Path
 
-    st.markdown(
-        "<div style='font-family:Inter,sans-serif;'>"
-        "<div style='font-size:1.4rem;font-weight:800;background:var(--accent-glow);"
-        "-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>Developer Console</div>"
-        "<div style='color:var(--text-muted);font-size:0.85rem;'>"
-        "Manual maintenance triggers. These actions modify on-disk state. Use with care.</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    # ---------- Phase 24.14 — password gate ----------
+    expected = os.getenv("OMNI_DEV_PASSWORD", "").strip()
+
+    if not expected:
+        st.warning(
+            "**Dev tab is disabled.** Set `OMNI_DEV_PASSWORD` in your `.env` "
+            "to enable it. The tab can run subprocesses (model retraining, "
+            "data ingest, cache purge) so it's gated by default."
+        )
+        return
+
+    if not st.session_state.get("__dev_unlocked", False):
+        st.markdown(
+            "<div style='font-family:Inter,sans-serif;'>"
+            "<div style='font-size:1.4rem;font-weight:800;background:var(--accent-glow);"
+            "-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>"
+            "🔒 Developer Console</div>"
+            "<div style='color:var(--text-muted);font-size:0.85rem;'>"
+            "This area runs subprocesses and modifies on-disk state. "
+            "Enter the dev password to continue.</div></div>",
+            unsafe_allow_html=True,
+        )
+        st.divider()
+        col_pw, col_btn = st.columns([4, 1])
+        with col_pw:
+            pw = st.text_input(
+                "Password", type="password", key="__dev_pw_input",
+                label_visibility="collapsed", placeholder="Dev password",
+            )
+        with col_btn:
+            unlock = st.button("Unlock", use_container_width=True, type="primary")
+        if unlock:
+            # Timing-safe comparison so an attacker can't infer length
+            if hmac.compare_digest(pw or "", expected):
+                st.session_state["__dev_unlocked"] = True
+                st.session_state.pop("__dev_pw_input", None)
+                st.rerun()
+            else:
+                st.error("Wrong password.")
+                _log.warning("dev tab failed unlock attempt")
+        return
+
+    # ---------- unlocked — show full panel ----------
+
+    # Phase 24.13 — cross-platform helpers for the dev-tab subprocess
+    # buttons. Earlier hardcoded `.venv\\Scripts\\python.exe` only works on
+    # Windows. `sys.executable` is the path of the *currently running*
+    # interpreter regardless of OS, so it picks up the venv automatically.
+    _PY = sys.executable
+    def _script(*parts: str) -> str:
+        """Build a script path that works on Windows + macOS + Linux."""
+        return str(Path("scripts").joinpath(*parts))
+
+    # Lock button at the top so it's always reachable
+    col_h1, col_h2 = st.columns([5, 1])
+    with col_h1:
+        st.markdown(
+            "<div style='font-family:Inter,sans-serif;'>"
+            "<div style='font-size:1.4rem;font-weight:800;background:var(--accent-glow);"
+            "-webkit-background-clip:text;-webkit-text-fill-color:transparent;'>Developer Console</div>"
+            "<div style='color:var(--text-muted);font-size:0.85rem;'>"
+            "Manual maintenance triggers. These actions modify on-disk state. Use with care.</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with col_h2:
+        if st.button("🔒 Lock", use_container_width=True,
+                     help="Re-lock the dev tab. You'll need to enter the password again."):
+            st.session_state["__dev_unlocked"] = False
+            st.rerun()
     st.divider()
 
     # --------- Cache stats ---------
@@ -806,7 +986,7 @@ def _render_dev_tab() -> None:
     with cols[1]:
         st.metric("Cache size", f"{size_mb:.1f} MB")
     with cols[2]:
-        if st.button("🗑 Clear prediction cache", width='stretch',
+        if st.button("🗑 Clear prediction cache", use_container_width=True,
                      help="Drops every cached PredictionCard and bench card. "
                           "Next predict_ticker() call will rebuild from live APIs."):
             n1 = invalidate("predict_card:")
@@ -814,7 +994,7 @@ def _render_dev_tab() -> None:
             n3 = invalidate("bench_card:")
             st.success(f"cleared {n1 + n2 + n3} cached prediction entries")
     with cols[3]:
-        if st.button("🗑 Clear ALL caches", width='stretch',
+        if st.button("🗑 Clear ALL caches", use_container_width=True,
                      help="Nuclear option — drops everything. "
                           "Next page load will re-fetch prices, news, fundamentals, macros."):
             cache.clear()
@@ -833,23 +1013,26 @@ def _render_dev_tab() -> None:
                 size_mb = f.stat().st_size / (1024 * 1024)
                 artifacts.append({"file": f.name, "size_MB": round(size_mb, 2),
                                   "modified": mtime})
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                # File can disappear between the glob and the stat (e.g.
+                # if a retrain replaces it mid-listing). Skip the row but
+                # keep a debug breadcrumb so genuine permission/io errors
+                # don't vanish silently.
+                _log.debug("dev: skip artifact %s: %s", f.name, exc)
     if artifacts:
-        import pandas as pd
-        st.dataframe(pd.DataFrame(artifacts), width='stretch', hide_index=True)
+        st.dataframe(pd.DataFrame(artifacts), use_container_width=True, hide_index=True)
     else:
         st.caption("no model artifacts found in data/models/")
 
     cols = st.columns(3)
     with cols[0]:
-        if st.button("🔁 Refit regime (HMM)", width='stretch',
+        if st.button("🔁 Refit regime (HMM)", use_container_width=True,
                      help="Re-run scripts/refit_regime.py — pulls latest macro data "
                           "and refits the 4-state HMM. Updates 'Last regime point'."):
             with st.spinner("running refit_regime…"):
                 try:
                     rc = subprocess.run(
-                        [".venv\\Scripts\\python.exe", "scripts\\retrain_all.py", "--regime-only"],
+                        [_PY, _script("retrain_all.py"), "--regime-only"],
                         capture_output=True, text=True, timeout=300,
                     )
                     if rc.returncode == 0:
@@ -862,7 +1045,7 @@ def _render_dev_tab() -> None:
                     st.warning("scripts/retrain_all.py --regime-only not wired; "
                                 "run manually: python scripts/refit_regime.py")
     with cols[1]:
-        if st.button("🔁 Retrain universal", width='stretch',
+        if st.button("🔁 Retrain universal", use_container_width=True,
                      help="Walk-forward retrain of XGB+isotonic for h=1/5/21. "
                           "Takes 30-90s on GPU."):
             with st.spinner("retraining universal…"):
@@ -870,7 +1053,7 @@ def _render_dev_tab() -> None:
                     env = os.environ.copy()
                     env["OMNI_XGB_DEVICE"] = "cuda"
                     rc = subprocess.run(
-                        [".venv\\Scripts\\python.exe", "scripts\\train_universal_model.py",
+                        [_PY, _script("train_universal_model.py"),
                          "--horizons", "1,5,21", "--force"],
                         capture_output=True, text=True, timeout=600, env=env,
                     )
@@ -882,7 +1065,7 @@ def _render_dev_tab() -> None:
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"retrain error: {exc}")
     with cols[2]:
-        if st.button("🔁 Retrain stack ensemble", width='stretch',
+        if st.button("🔁 Retrain stack ensemble", use_container_width=True,
                      help="Stack retrain h=5 with XGB+HGB+LGB+NHITS bases. "
                           "Takes 5-15 min on GPU."):
             with st.spinner("retraining stack…"):
@@ -892,7 +1075,7 @@ def _render_dev_tab() -> None:
                     env["OMNI_LGB_DEVICE"] = "cuda"
                     env["OMNI_NHITS_DEVICE"] = "cuda"
                     rc = subprocess.run(
-                        [".venv\\Scripts\\python.exe", "scripts\\train_universal_model.py",
+                        [_PY, _script("train_universal_model.py"),
                          "--horizons", "5", "--ensemble", "stack", "--force"],
                         capture_output=True, text=True, timeout=1800, env=env,
                     )
@@ -918,7 +1101,6 @@ def _render_dev_tab() -> None:
                     lake_stats[f"prices/{ac_dir.name}"] = len(list(ac_dir.glob("*.parquet")))
         ts = lake_root / "training" / "training_set.parquet"
         if ts.exists():
-            import pandas as pd
             df = pd.read_parquet(ts)
             lake_stats["training_set rows"] = len(df)
             lake_stats["training_set cols"] = len(df.columns)
@@ -932,7 +1114,7 @@ def _render_dev_tab() -> None:
 
     cols = st.columns(3)
     with cols[0]:
-        if st.button("🌐 Refresh marquee", width='stretch',
+        if st.button("🌐 Refresh marquee", use_container_width=True,
                      help="Force a fresh yfinance fetch for the top ticker tape."):
             try:
                 from omni.dashboard.marquee import fetch_marquee_data
@@ -944,27 +1126,27 @@ def _render_dev_tab() -> None:
             except Exception as exc:  # noqa: BLE001
                 st.error(f"refresh failed: {exc}")
     with cols[1]:
-        if st.button("📊 Run SBI benchmark", width='stretch',
+        if st.button("📊 Run SBI benchmark", use_container_width=True,
                      help="Sanity check: predict SBIN.NS end-to-end and compare "
                           "live vs offline path (parity test)."):
             with st.spinner("running benchmark_sbi.py…"):
                 try:
                     rc = subprocess.run(
-                        [".venv\\Scripts\\python.exe", "scripts\\benchmark_sbi.py"],
+                        [_PY, _script("benchmark_sbi.py")],
                         capture_output=True, text=True, timeout=180,
                     )
                     st.code((rc.stdout + "\n" + rc.stderr)[-2500:], language="text")
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"benchmark error: {exc}")
     with cols[2]:
-        if st.button("🧹 Rebuild training set", width='stretch',
+        if st.button("🧹 Rebuild training set", use_container_width=True,
                      help="Re-run scripts/build_training_set.py — pulls all "
                           "tickers from lake and rebuilds the pooled training "
                           "frame. ~10-20 min."):
             with st.spinner("rebuilding training set… (~15 min)"):
                 try:
                     rc = subprocess.run(
-                        [".venv\\Scripts\\python.exe", "scripts\\build_training_set.py",
+                        [_PY, _script("build_training_set.py"),
                          "--no-news", "--asset-classes", "us,india,crypto"],
                         capture_output=True, text=True, timeout=1800,
                     )
@@ -975,6 +1157,301 @@ def _render_dev_tab() -> None:
                         st.error(f"failed: {rc.stderr[-500:]}")
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"build error: {exc}")
+
+    st.divider()
+
+    # --------- Phase 24.14 — Daily orchestrator + Drive backup ---------
+    st.markdown("### Daily orchestrator & Drive backup")
+    st.caption(
+        "Run the full daily pipeline (mount Drive → ingest → features → "
+        "regime → predict → rubric → gate → persist) and back up the data "
+        "lake to your mounted Google Drive. None of this happens on a "
+        "schedule by default — you have to wire that up via Windows Task "
+        "Scheduler or `cron` (instructions below)."
+    )
+
+    # Live status of the Drive mount
+    try:
+        from omni.storage import drive as _drv
+        drv_mounted = _drv.is_mounted()
+        drv_root = str(_drv.drive_path()).split("Omni_Stocks")[0] + "Omni_Stocks"
+    except Exception:
+        drv_mounted = False
+        drv_root = "(unknown)"
+
+    drv_chip = (
+        "<span style='color:#4ade80;background:rgba(74,222,128,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>MOUNTED</span>"
+        if drv_mounted else
+        "<span style='color:#f87171;background:rgba(248,113,113,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>NOT MOUNTED</span>"
+    )
+    st.markdown(
+        f"<div style='font-size:13px;color:#cbd5e1;margin-bottom:8px;'>"
+        f"Drive mount status: {drv_chip} "
+        f"<code style='color:rgba(148,163,184,0.7);font-size:11px;'>{_esc(drv_root)}</code>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(3)
+    with cols[0]:
+        if st.button("⚡ Run daily orchestrator now", use_container_width=True,
+                     help="Execute scripts/run_daily.py — full ingest + features + "
+                          "predict + persist. ~5-15 min depending on universe size. "
+                          "Output appears below when done."):
+            with st.spinner("running daily orchestrator…"):
+                try:
+                    rc = subprocess.run(
+                        [_PY, _script("run_daily.py")],
+                        capture_output=True, text=True, timeout=1800,
+                    )
+                    tail = (rc.stdout + "\n" + rc.stderr)[-3000:]
+                    if rc.returncode == 0:
+                        st.success("daily run complete")
+                        # Force-clear dashboard caches so new artifacts surface
+                        _c.load_predictions.clear()
+                        _c.load_signals.clear()
+                        _c.load_regime.clear()
+                        _c.load_backtest_summary.clear()
+                    else:
+                        st.error(f"failed (exit {rc.returncode})")
+                    st.code(tail, language="text")
+                except FileNotFoundError:
+                    st.warning(
+                        "`scripts/run_daily.py` not found. Use "
+                        "`python -m omni.orchestrator.daily` directly, "
+                        "or create the wrapper script."
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"run failed: {exc}")
+    with cols[1]:
+        if st.button("☁️ Sync local lake → Drive", use_container_width=True,
+                     disabled=not drv_mounted,
+                     help="Copy data/lake/** to Drive root. Idempotent — only "
+                          "new/changed files transfer. Mount Drive first."):
+            with st.spinner("syncing to Drive…"):
+                try:
+                    src = Path("data/lake")
+                    if not src.exists():
+                        st.warning("`data/lake/` is empty — nothing to sync.")
+                    else:
+                        # Use robocopy on Windows / rsync on Unix for efficient
+                        # incremental sync. Both are stdlib-free wrappers.
+                        if sys.platform == "win32":
+                            dst = Path(drv_root) / "lake"
+                            cmd = ["robocopy", str(src), str(dst), "/E", "/MIR",
+                                   "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/NS"]
+                        else:
+                            dst = Path(drv_root) / "lake"
+                            dst.mkdir(parents=True, exist_ok=True)
+                            cmd = ["rsync", "-a", "--delete",
+                                   str(src) + "/", str(dst) + "/"]
+                        rc = subprocess.run(cmd, capture_output=True, text=True,
+                                            timeout=1800)
+                        # robocopy success codes: 0-7 are non-fatal
+                        ok = (rc.returncode <= 7) if sys.platform == "win32" \
+                            else (rc.returncode == 0)
+                        if ok:
+                            st.success("sync complete")
+                        else:
+                            st.error(f"sync failed (exit {rc.returncode})")
+                        st.code((rc.stdout + "\n" + rc.stderr)[-1500:], language="text")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"sync error: {exc}")
+    with cols[2]:
+        with st.expander("📅 How to schedule daily run", expanded=False):
+            st.markdown(
+                "**Windows (Task Scheduler):**\n"
+                "```\n"
+                "schtasks /create /tn OmniDaily /tr "
+                "\"C:\\Omni_Stocks\\.venv\\Scripts\\python.exe "
+                "C:\\Omni_Stocks\\scripts\\run_daily.py\" /sc daily /st 18:30\n"
+                "```\n"
+                "Runs every day at 6:30pm IST after market close.\n\n"
+                "**macOS / Linux (cron):**\n"
+                "```\n"
+                "30 18 * * 1-5 cd ~/Omni_Stocks && "
+                ".venv/bin/python scripts/run_daily.py >> data/daily.log 2>&1\n"
+                "```\n"
+                "Weekdays only; logs to `data/daily.log`."
+            )
+
+    st.divider()
+
+    # --------- Phase 24.15 — RAG store maintenance ---------
+    st.markdown("### RAG store (news embeddings for grounded why-text)")
+    st.caption(
+        "Local Qdrant store at `data/rag/qdrant/`. Holds chunked news "
+        "(Nemotron 1024-d embeddings) used by the grounded why-text "
+        "pipeline. Ingest is idempotent — re-running just refreshes any "
+        "new articles. Predictions auto-ingest the news they pull, so "
+        "the store grows organically; this button is for bulk warm-ups."
+    )
+
+    rag_cols = st.columns([2, 2, 2])
+    with rag_cols[0]:
+        try:
+            from omni.llm.rag.store import RAGStore as _RAGStore
+            _stats = _RAGStore().stats()
+            stats_json = {
+                "total_points": _stats.total_points,
+                "collections": _stats.collections,
+                "path": _stats.storage_path,
+            }
+            st.json(stats_json, expanded=False)
+        except Exception as exc:  # noqa: BLE001
+            st.caption(f"rag stats unavailable: {exc}")
+
+    with rag_cols[1]:
+        if st.button("🔍 Re-index news → RAG", use_container_width=True,
+                     help="Walk all data/raw_fallback/news_* parquet files, "
+                          "chunk them, embed via Nemotron, and upsert to "
+                          "Qdrant. Idempotent. ~10 min for 30 days × full "
+                          "universe."):
+            with st.spinner("re-indexing news…"):
+                try:
+                    from omni.llm.rag.pipeline import get_pipeline
+                    from omni.llm.rag.chunker import chunk_news_dataframe
+                    pipe = get_pipeline()
+                    n_files = 0
+                    n_articles = 0
+                    n_chunks = 0
+                    news_dirs = [
+                        Path("data/raw_fallback/news_newsapi/all"),
+                        Path("data/raw_fallback/news_rss/all"),
+                    ]
+                    for nd in news_dirs:
+                        if not nd.exists():
+                            continue
+                        for parq in nd.glob("*.parquet"):
+                            n_files += 1
+                            try:
+                                df = pd.read_parquet(parq)
+                            except Exception:
+                                continue
+                            if df.empty or "ticker_hint" not in df.columns:
+                                continue
+                            for tk, grp in df.groupby("ticker_hint"):
+                                if not tk:
+                                    continue
+                                tk_up = str(tk).upper()
+                                # Heuristic: NSE tickers typically have .NS
+                                # suffix, crypto has -USD, US tickers are bare.
+                                if tk_up.endswith(".NS") or tk_up.endswith(".BO"):
+                                    ac = "india"
+                                elif tk_up.endswith("-USD") or tk_up.endswith("USD"):
+                                    ac = "crypto"
+                                else:
+                                    ac = "us"
+                                pipe.ingest_news_for_ticker(grp, ticker=tk_up,
+                                                              asset_class=ac)
+                                n_articles += len(grp)
+                                n_chunks += len(grp)  # ~1 chunk per article
+                    st.success(f"re-indexed {n_articles:,} articles "
+                                f"({n_chunks:,} chunks) from {n_files} files")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"re-index failed: {exc}")
+
+    with rag_cols[2]:
+        purge_days = st.number_input(
+            "Purge older than (days)", min_value=30, max_value=365,
+            value=90, step=15,
+            help="Drop chunks with date < (today - N days). Use to keep "
+                 "the store small after long uptime.",
+        )
+        if st.button("🗑 Purge old chunks", use_container_width=True):
+            try:
+                from omni.llm.rag.store import RAGStore as _RAGStore
+                _RAGStore().purge_older_than(int(purge_days))
+                st.success(f"purged chunks older than {purge_days}d")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"purge failed: {exc}")
+
+    st.divider()
+
+    # --------- Phase 24.14 — Indian live data smoke test ---------
+    st.markdown("### Indian live data (NSE / BSE)")
+    st.caption(
+        "Free real-time quotes for NSE/BSE via the `nsepython` library "
+        "(scrapes nseindia.com directly — ~1s latency, no API key needed). "
+        "Polygon's free tier doesn't cover Indian markets; yfinance is "
+        "15-min delayed and IP-blocks aggressively."
+    )
+    try:
+        import importlib
+        importlib.import_module("nsepython")
+        nsepy_installed = True
+    except ImportError:
+        nsepy_installed = False
+
+    cols = st.columns([2, 1, 2])
+    with cols[0]:
+        nse_ticker = st.text_input(
+            "Ticker", value="RELIANCE", key="nse_test_ticker",
+            help="NSE symbol without .NS suffix (e.g. RELIANCE, TCS, SBIN, INFY)",
+        )
+    with cols[1]:
+        if not nsepy_installed:
+            if st.button("📦 Install nsepython", use_container_width=True,
+                         help="Runs `pip install nsepython`. ~30s."):
+                with st.spinner("installing…"):
+                    try:
+                        rc = subprocess.run(
+                            [_PY, "-m", "pip", "install", "nsepython"],
+                            capture_output=True, text=True, timeout=180,
+                        )
+                        if rc.returncode == 0:
+                            st.success("installed — refresh page to enable")
+                        else:
+                            st.error(f"install failed: {rc.stderr[-500:]}")
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"install error: {exc}")
+        else:
+            if st.button("📡 Fetch live quote", use_container_width=True,
+                         type="primary"):
+                with st.spinner("fetching from nseindia.com…"):
+                    try:
+                        from nsepython import nse_eq  # type: ignore
+                        q = nse_eq(nse_ticker.strip().upper())
+                        info = q.get("priceInfo", {}) or {}
+                        st.session_state["__nse_quote"] = {
+                            "symbol": nse_ticker.upper(),
+                            "ltp": info.get("lastPrice"),
+                            "change": info.get("change"),
+                            "pct": info.get("pChange"),
+                            "vwap": info.get("vwap"),
+                            "open": info.get("open"),
+                            "high": info.get("intraDayHighLow", {}).get("max"),
+                            "low": info.get("intraDayHighLow", {}).get("min"),
+                            "prev_close": info.get("previousClose"),
+                            "fetched_at": datetime.now(timezone.utc)
+                                .strftime("%Y-%m-%d %H:%M:%S UTC"),
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"nsepython error: {exc}")
+    with cols[2]:
+        q = st.session_state.get("__nse_quote")
+        if q:
+            ltp = q.get("ltp")
+            pct = q.get("pct")
+            color = "#4ade80" if (pct or 0) >= 0 else "#f87171"
+            ltp_s = f"₹{ltp:,.2f}" if ltp else "₹—"
+            pct_s = f"({pct:+.2f}%)" if pct is not None else ""
+            st.markdown(
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:13px;'>"
+                f"<div><b style='font-size:16px;'>{_esc(q['symbol'])}</b> "
+                f"<span style='color:{color};font-weight:700;'>{ltp_s}</span> "
+                f"<span style='color:{color};'>{pct_s}</span></div>"
+                f"<div style='color:rgba(148,163,184,0.85);font-size:11px;margin-top:4px;'>"
+                f"O {q.get('open','—')} · H {q.get('high','—')} · "
+                f"L {q.get('low','—')} · prev {q.get('prev_close','—')}"
+                f"</div>"
+                f"<div style='color:rgba(148,163,184,0.55);font-size:10px;margin-top:2px;'>"
+                f"fetched {_esc(str(q.get('fetched_at','')))}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
     st.divider()
 
@@ -991,14 +1468,17 @@ def _render_dev_tab() -> None:
                 env_info[pkg] = getattr(mod, "__version__", "?")
             except Exception:
                 env_info[pkg] = "(not installed)"
-        # GPU check
+        # GPU check — torch may be missing on CPU-only deploys; that's
+        # expected, just don't spam the env panel with the absence.
         try:
             import torch as _t
             env_info["cuda_available"] = _t.cuda.is_available()
             if _t.cuda.is_available():
                 env_info["cuda_device"] = _t.cuda.get_device_name(0)
-        except Exception:
-            pass
+        except ImportError:
+            env_info["cuda_available"] = "(torch not installed)"
+        except Exception as exc:  # noqa: BLE001
+            env_info["cuda_available"] = f"(error: {exc})"
         st.json(env_info)
     except Exception as exc:  # noqa: BLE001
         st.caption(f"env info unavailable: {exc}")
@@ -1012,8 +1492,11 @@ def _render_predict_tab() -> None:
     button triggers `deep_analysis` which fits a per-ticker walk-forward
     XGBoost model on the live bundle.
     """
-    # Lazy imports — avoid pulling pandas/xgboost into the sidebar render
-    from omni.ondemand.predict import deep_analysis, predict_ticker
+    # Lazy imports — avoid pulling pandas/xgboost into the sidebar render.
+    # `predict_via_api` is the public entry point; it routes through the
+    # FastAPI service when available and falls back to in-process otherwise.
+    from omni.ondemand.predict import deep_analysis, predict_ticker  # noqa: F401  (used by fallback)
+    from omni.api.client import predict_via_api
 
     # Phase 24.8 — concise primary instruction with a tooltip for details.
     # Replaces the long "Type any ticker — searches NSE, NASDAQ, NYSE, ..."
@@ -1053,7 +1536,7 @@ def _render_predict_tab() -> None:
             with tab_freq:
                 _render_history_pills(frequent, prefix="freq", show_count=True)
             cc1, cc2 = st.columns([1, 1])
-            if cc1.button("Clear history", key="sh_clear", width='stretch',
+            if cc1.button("Clear history", key="sh_clear", use_container_width=True,
                             help="Permanently drop all stored searches"):
                 n = _sh.clear_all()
                 st.toast(f"Cleared {n} entries from history.", icon="🗑️")
@@ -1064,6 +1547,9 @@ def _render_predict_tab() -> None:
     initial = _suggest_options("")
 
     col_q, col_run, col_deep, col_refresh = st.columns([5, 2, 2, 2])
+    # Wrap each button in a class that lifts it to align with the selectbox
+    # input baseline — replaces the brittle `<div height:1.85rem>` spacers.
+    _btn_align = "<div class='predict-action-btn'></div>"
     with col_q:
         try:
             choice = st.selectbox(
@@ -1082,26 +1568,29 @@ def _render_predict_tab() -> None:
                 key="predict_ticker_text",
             )
     with col_run:
-        st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
-        run_clicked = st.button("Run prediction", width='stretch', type="primary")
+        st.markdown(_btn_align, unsafe_allow_html=True)
+        run_clicked = st.button("Run prediction", use_container_width=True, type="primary")
     with col_deep:
-        st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
-        deep_clicked = st.button("Deep analysis (~15s)", width='stretch')
+        st.markdown(_btn_align, unsafe_allow_html=True)
+        deep_clicked = st.button("Deep analysis (~15s)", use_container_width=True)
     with col_refresh:
-        st.markdown("<div style='height:1.85rem;'></div>", unsafe_allow_html=True)
+        st.markdown(_btn_align, unsafe_allow_html=True)
         # Phase 24.8 — was showing "🔄 Force refresh" — the emoji rendered as
         # an ambiguous checkbox-looking glyph on some Windows fonts. Replaced
         # with a clean text label; intent is clear, no glyph confusion.
         refresh_clicked = st.button(
-            "Force refresh", width='stretch',
+            "Force refresh", use_container_width=True,
             help="Drop cached prediction + prices + news for this ticker "
                   "and re-fetch live. Use when you want intraday-fresh data.",
         )
 
     raw = _parse_label(choice) if choice else ""
     if not raw:
-        st.info("Enter a ticker to begin.")
-        # Show universal model status as a small pill row
+        # Phase 24.10 — was a giant st.info "Enter a ticker to begin." box
+        # that violated padding < radius rules and added unjustified visual
+        # weight to a 5-word helper. The text_input placeholder already says
+        # "e.g. AAPL, RELIANCE.NS, BTC-USD" — that's enough. Just show the
+        # universal-model status if it's not ready.
         avail = model_registry.is_available()
         if not avail:
             st.caption(
@@ -1117,10 +1606,10 @@ def _render_predict_tab() -> None:
     confidence_label = "match: curated" if res.confident else "match: parsed"
     pill_row = (
         f"<div style='display:flex;gap:8px;margin:4px 0 12px 0;flex-wrap:wrap;'>"
-        f"{pill(res.ticker, kind='long')}"
-        f"{pill(res.asset_class, kind='flat')}"
-        f"{pill(res.display_name, kind='flat')}"
-        f"{pill(confidence_label, kind='flat')}"
+        f"{pill(_esc(str(res.ticker)), kind='long')}"
+        f"{pill(_esc(str(res.asset_class)), kind='flat')}"
+        f"{pill(_esc(str(res.display_name)), kind='flat')}"
+        f"{pill(_esc(confidence_label), kind='flat')}"
         f"</div>"
     )
     st.markdown(pill_row, unsafe_allow_html=True)
@@ -1131,7 +1620,7 @@ def _render_predict_tab() -> None:
     is_fav = _wl.is_favorite(res.ticker)
     fav_label = "★ Remove from watchlist" if is_fav else "☆ Add to watchlist"
     if fav_col1.button(fav_label, key=f"fav_btn_{res.ticker}",
-                         width='stretch'):
+                         use_container_width=True):
         if is_fav:
             _wl.remove_favorite(res.ticker)
             fav_col2.success(f"Removed **{res.ticker}** from watchlist.")
@@ -1155,25 +1644,82 @@ def _render_predict_tab() -> None:
         # Treat refresh as an implicit Run
         run_clicked = True
 
+    # ------------------------------------------------------------------
+    # Production loading UX (Phase 24.16)
+    # While predict_ticker / deep_analysis blocks (5-15s on cold cache),
+    # show a slim top progress bar + a skeleton card so the page never
+    # looks frozen. Both are CSS-animated; we just reserve `st.empty()`
+    # slots and clear them once the call returns.
+    # ------------------------------------------------------------------
+    def _show_loading(label: str):
+        """Render top progress bar + skeleton placeholder card.
+        Returns (progress_slot, skeleton_slot) — caller .empty()s them
+        when the real card is ready.
+        """
+        progress_slot = st.empty()
+        skeleton_slot = st.empty()
+        progress_slot.markdown(
+            "<div class='top-progress' role='progressbar' "
+            f"aria-label='{label}'></div>",
+            unsafe_allow_html=True,
+        )
+        skeleton_slot.markdown(
+            "<div class='card' style='padding:20px 22px'>"
+            "<div style='display:flex;justify-content:space-between;"
+            "align-items:flex-start;gap:16px;margin-bottom:14px'>"
+            "<div style='flex:1'>"
+            "<div class='skel skel-line-lg'></div>"
+            "<div class='skel skel-line-sm'></div>"
+            "</div>"
+            "<div style='display:flex;gap:6px;'>"
+            "<span class='skel skel-pill'></span>"
+            "<span class='skel skel-pill'></span>"
+            "<span class='skel skel-pill'></span>"
+            "</div></div>"
+            "<hr class='hairline'/>"
+            "<div style='display:grid;grid-template-columns:repeat(4, 1fr);"
+            "gap:14px;margin:10px 0'>"
+            "<div class='skel skel-tile'></div>"
+            "<div class='skel skel-tile'></div>"
+            "<div class='skel skel-tile'></div>"
+            "<div class='skel skel-tile'></div>"
+            "</div>"
+            "<hr class='hairline'/>"
+            "<div class='skel skel-line'></div>"
+            "<div class='skel skel-line'></div>"
+            "<div class='skel skel-line-sm'></div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return progress_slot, skeleton_slot
+
     if deep_clicked:
-        with st.spinner(f"Fitting walk-forward model for {res.ticker}…"):
-            try:
-                card = deep_analysis(res.ticker, res.asset_class, display_name=res.display_name)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Deep analysis failed: {exc}")
-                return
-        st.session_state["predict_last_card"] = card.to_dict() if card else None
+        progress_slot, skeleton_slot = _show_loading(f"Deep analysis · {res.ticker}")
+        try:
+            # Routes through the API client; falls back to in-process
+            # automatically when the API isn't reachable.
+            card_dict = predict_via_api(res.ticker, res.asset_class,
+                                         display_name=res.display_name, deep=True)
+        except Exception as exc:  # noqa: BLE001
+            progress_slot.empty(); skeleton_slot.empty()
+            st.error(f"Deep analysis failed: {exc}")
+            return
+        progress_slot.empty(); skeleton_slot.empty()
+        st.session_state["predict_last_card"] = card_dict
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
-        _record_and_update_lru(res, card)
+        _record_and_update_lru(res, card_dict)
     elif run_clicked:
-        with st.spinner(f"Fetching live data for {res.ticker}…"):
-            try:
-                card = predict_ticker(res.ticker, res.asset_class, display_name=res.display_name)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Prediction failed: {exc}")
-                return
-        if card is None:
+        progress_slot, skeleton_slot = _show_loading(f"Predicting {res.ticker}")
+        try:
+            card_dict = predict_via_api(res.ticker, res.asset_class,
+                                         display_name=res.display_name, deep=False)
+        except Exception as exc:  # noqa: BLE001
+            progress_slot.empty(); skeleton_slot.empty()
+            st.error(f"Prediction failed: {exc}")
+            return
+        progress_slot.empty(); skeleton_slot.empty()
+        if card_dict is None:
             st.error(
                 f"Could not generate a prediction for **{res.ticker}** "
                 f"({res.asset_class}). This usually means:\n"
@@ -1183,10 +1729,10 @@ def _render_predict_tab() -> None:
                 f"Tip: try the BSE form (e.g. `{res.ticker}.BO`) or pick from the dropdown above."
             )
             return
-        st.session_state["predict_last_card"] = card.to_dict() if card else None
+        st.session_state["predict_last_card"] = card_dict
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
-        _record_and_update_lru(res, card)
+        _record_and_update_lru(res, card_dict)
 
     # Render last card from session_state (survives reruns)
     cd = st.session_state.get("predict_last_card")
@@ -1261,7 +1807,7 @@ def main() -> None:
         from omni.dashboard.marquee import render_marquee
         render_marquee(height_px=36)
     except Exception:  # noqa: BLE001
-        pass
+        _log.warning("marquee render failed", exc_info=True)
 
     # ---- sidebar
     with st.sidebar:
@@ -1272,6 +1818,34 @@ def main() -> None:
             "<div style='color:var(--text-muted);font-size:0.78rem;letter-spacing:0.18em;"
             "text-transform:uppercase;'>signal console</div></div>",
             unsafe_allow_html=True,
+        )
+        st.divider()
+
+        # Phase 24.10 — primary section navigation. Replaces the 12-tab
+        # horizontal strip that used to live above the page content.
+        section_options = [
+            "Predict",
+            "Watchlist",
+            "Portfolio",
+            "Top movers",
+            "Top signals",
+            "Watchlist heatmap",
+            "Cosmos 3D",
+            "Correlations",
+            "Calibration",
+            "Earnings",
+            "History",
+            "Dev",
+        ]
+        current = st.session_state.get("__section", "Predict")
+        if current not in section_options:
+            current = "Predict"
+        st.radio(
+            "Section",
+            section_options,
+            index=section_options.index(current),
+            key="__section",
+            label_visibility="collapsed",
         )
         st.divider()
 
@@ -1292,7 +1866,7 @@ def main() -> None:
         _theme_override(theme_choice)
 
         st.markdown("**Filters**")
-        if st.button("⟳ Reload artifacts", width='stretch'):
+        if st.button("⟳ Reload artifacts", use_container_width=True):
             _c.load_predictions.clear()
             _c.load_signals.clear()
             _c.load_regime.clear()
@@ -1335,8 +1909,7 @@ def main() -> None:
         # Phase 24.5 — staleness indicator (warn if the regime model is >7d old)
         if last_run is not None:
             try:
-                from datetime import datetime as _dt
-                age_days = (_dt.now(timezone.utc).date() - last_run.date()).days
+                age_days = (datetime.now(timezone.utc).date() - last_run.date()).days
             except Exception:
                 age_days = 0
             if age_days > 30:
@@ -1401,32 +1974,32 @@ def main() -> None:
     # ---- 2. KPI row
     _u.kpi_row(summary)
 
-    # ---- 3. tabs
-    (tab_predict, tab_watch, tab_portfolio, tab_movers, tab_heat,
-     tab_signals, tab_cosmos, tab_corr, tab_calib, tab_earnings,
-     tab_history, tab_dev) = st.tabs([
-        "Predict", "★ Watchlist", "Portfolio", "Top movers",
-        "Watchlist heatmap", "Top signals", "Cosmos 3D", "Correlations",
-        "Calibration", "Earnings", "History", "🛠 Dev",
-    ])
+    # ---- 3. section nav (was a 12-tab horizontal strip; moved to sidebar
+    #         in Phase 24.10 — too much horizontal real estate eaten by tabs,
+    #         and tab labels were cramped on smaller windows. Sidebar radio
+    #         is cleaner and lets the main canvas breathe.)
+    section = st.session_state.get("__section", "Predict")
 
-    with tab_predict:
+    if section == "Predict":
         _render_predict_tab()
 
-    with tab_watch:
+    elif section == "Watchlist":
         _render_watchlist_tab()
 
-    with tab_portfolio:
+    elif section == "Portfolio":
         _render_portfolio_tab()
 
-    with tab_movers:
+    elif section == "Top movers":
         _render_movers_tab()
 
-    with tab_heat:
+    elif section == "Watchlist heatmap":
         st.caption("Color = direction × conviction. Cyan = high-conviction long, red = high-conviction short.")
-        _u.universe_heatmap(f)
+        if f.empty:
+            st.info("No tickers match the current filters. Loosen filters in the sidebar to see the heatmap.")
+        else:
+            _u.universe_heatmap(f)
 
-    with tab_signals:
+    elif section == "Top signals":
         if f.empty:
             st.info("No signals match the current filters.")
         else:
@@ -1439,7 +2012,7 @@ def main() -> None:
                 with cols[i % 2]:
                     _u.signal_card(row)
 
-    with tab_cosmos:
+    elif section == "Cosmos 3D":
         st.caption("Each sphere = a ticker. Radius ∝ conviction · colour = direction · cluster = asset class · orbit speed ∝ recent vol. Drag to rotate, hover for details.")
         try:
             from omni.dashboard.charts.cosmos3d import render_cosmos
@@ -1457,45 +2030,70 @@ def main() -> None:
                         "move_1w_pct": float(r.get("expected_move_pct", 0.0) or 0.0),
                         "rubric_total": float(r.get("rubric_total", 50.0) or 50.0),
                     })
-            render_cosmos(cards, height=560, title="Signal Cosmos")
+            if not cards:
+                st.info("No signals available — run the daily orchestrator to populate the cosmos.")
+            else:
+                render_cosmos(cards, height=560, title="Signal Cosmos")
         except Exception as exc:  # noqa: BLE001
             st.warning(f"cosmos unavailable: {exc}")
 
-    with tab_corr:
+    elif section == "Correlations":
         st.caption("D3 force-directed graph. Edge thickness ∝ |60-day correlation|. Drag nodes to rearrange.")
         try:
             from omni.dashboard.charts.corrgraph import render_corrgraph
             from omni.lake.io import read_prices
-            from omni.lake.paths import lake_root
-            import pandas as pd
+            from concurrent.futures import ThreadPoolExecutor
             tickers_pool = list(f["ticker"].unique())[:40] if not f.empty else []
-            cols_panel = {}
-            for tk in tickers_pool:
-                try:
-                    ac = f[f["ticker"] == tk]["asset_class"].iloc[0]
-                    p = read_prices(ac, tk)
-                    if p is not None and not p.empty:
-                        s = p.set_index("date")["adj_close"].tail(120)
-                        cols_panel[tk] = s
-                except Exception:
-                    continue
-            panel = pd.DataFrame(cols_panel) if cols_panel else pd.DataFrame()
-            render_corrgraph(panel, height=460, threshold=0.4, title="60-day Correlation Graph")
+            if not tickers_pool:
+                st.info("No tickers in the current filtered universe — adjust filters in the sidebar.")
+            else:
+                # Phase 24.12 — was a serial loop calling read_prices() up to
+                # 40 times per render (~3-6s on cold parquet cache). Each read
+                # is independent so we fan out with a small thread pool.
+                ac_map = {tk: f[f["ticker"] == tk]["asset_class"].iloc[0]
+                          for tk in tickers_pool}
+
+                def _load(tk: str):
+                    try:
+                        p = read_prices(ac_map[tk], tk)
+                        if p is not None and not p.empty:
+                            return tk, p.set_index("date")["adj_close"].tail(120)
+                    except Exception:
+                        return tk, None
+                    return tk, None
+
+                cols_panel: dict = {}
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    for tk, series in ex.map(_load, tickers_pool):
+                        if series is not None:
+                            cols_panel[tk] = series
+
+                panel = pd.DataFrame(cols_panel) if cols_panel else pd.DataFrame()
+                if panel.empty:
+                    st.info("No price history available locally for these tickers — run `omni-orch run-daily` to backfill.")
+                else:
+                    render_corrgraph(panel, height=460, threshold=0.4, title="60-day Correlation Graph")
         except Exception as exc:  # noqa: BLE001
             st.warning(f"correlation graph unavailable: {exc}")
 
-    with tab_calib:
-        _u.calibration_panel(preds)
+    elif section == "Calibration":
+        if preds is None or preds.empty:
+            st.info("No predictions available yet — run `omni-orch run-daily` to populate calibration data.")
+        else:
+            _u.calibration_panel(preds)
 
-    with tab_earnings:
+    elif section == "Earnings":
         _render_earnings_tab()
 
-    with tab_history:
-        _u.signal_history_table(signals, max_rows=300)
-        st.divider()
-        _render_replay_section()
+    elif section == "History":
+        if signals is None or signals.empty:
+            st.info("No signal history yet. The daily orchestrator writes to `data/signals/` — run it to populate this view.")
+        else:
+            _u.signal_history_table(signals, max_rows=300)
+            st.divider()
+            _render_replay_section()
 
-    with tab_dev:
+    elif section == "Dev":
         _render_dev_tab()
 
     st.markdown(

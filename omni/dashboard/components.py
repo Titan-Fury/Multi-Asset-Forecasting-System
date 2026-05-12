@@ -5,11 +5,41 @@ glass surfaces. All widgets degrade gracefully when data is missing.
 """
 from __future__ import annotations
 
+import html as _html  # Phase 24.16 — escape user-derived strings (XSS fix)
+from urllib.parse import urlparse
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from omni.dashboard.theme import pill, regime_gradient
+
+
+def _esc(s: object) -> str:
+    """HTML-escape a value for safe interpolation into st.markdown(unsafe_allow_html=True).
+
+    Phase 24.16 — added because news titles, URLs, and ticker symbols were
+    being interpolated raw into HTML across components.py. A news source
+    pushing a `<script>` tag in a headline would have executed in users'
+    browsers. This escapes &, <, >, ", and ' which is what html.escape
+    does with quote=True.
+    """
+    return _html.escape(str(s if s is not None else ""), quote=True)
+
+
+def _safe_url(url: object) -> str:
+    """Validate a URL is http(s) and escape it; replace anything suspicious
+    with '#'. Defangs javascript:, data:, file: URIs in news links."""
+    s = str(url or "").strip()
+    if not s:
+        return "#"
+    try:
+        p = urlparse(s)
+    except Exception:  # noqa: BLE001
+        return "#"
+    if p.scheme not in ("http", "https"):
+        return "#"
+    return _html.escape(s, quote=True)
 
 try:
     import plotly.graph_objects as go  # type: ignore
@@ -873,297 +903,21 @@ def prediction_card(card_dict: dict) -> None:
                 color = ("var(--kpi-positive)" if s > 0.2
                           else "var(--kpi-negative)" if s < -0.2
                           else "var(--text-muted)")
+                # Phase 24.16 — escape title/source and validate URL.
+                # News providers are upstream input; do not trust them.
+                _t = _esc(n.get("title", ""))
+                _u = _safe_url(n.get("url", ""))
+                _src = _esc(n.get("source", ""))
                 st.markdown(
                     f"<div style='padding:var(--space-2) 0;"
                     f"border-bottom:1px solid var(--border-subtle);"
                     f"font-size:var(--text-sm);line-height:1.45'>"
-                    f"<a href='{n.get('url','')}' style='color:var(--text-primary);"
-                    f"text-decoration:none' target='_blank'>{n.get('title','')}</a>"
+                    f"<a href='{_u}' style='color:var(--text-primary);"
+                    f"text-decoration:none' target='_blank' rel='noopener noreferrer'>{_t}</a>"
                     f"&nbsp;<span style='color:{color};font-family:JetBrains Mono,monospace;"
                     f"font-size:var(--text-xs)'>({s:+.2f})</span>"
                     f"&nbsp;<span style='color:var(--text-muted);font-size:var(--text-xs)'>"
-                    f"{n.get('source','')}</span></div>",
+                    f"{_src}</span></div>",
                     unsafe_allow_html=True,
                 )
 
-    label = _DIR_LABEL[direction]
-    kind = _DIR_KIND[direction]
-    conviction = float(card_dict.get("conviction", 0) or 0)
-    blended = float(card_dict.get("blended_p", 0) or 0)
-    proba_up = float(card_dict.get("proba_up", 0.5) or 0.5)
-    ticker = str(card_dict.get("ticker", "?"))
-    name = str(card_dict.get("display_name", ticker))
-    ac = str(card_dict.get("asset_class", ""))
-    rg = str(card_dict.get("regime", ""))
-    asof = str(card_dict.get("asof", ""))[:10]
-    passes = bool(card_dict.get("passes_gate", False))
-    reasons = str(card_dict.get("reasons", "") or "")
-    why = str(card_dict.get("why_text", ""))
-    model_kind = str(card_dict.get("model_kind", "universal_5d"))
-    fold_aucs = card_dict.get("fold_aucs")
-
-    # New v2 fields (with safe defaults so old cached cards don't crash)
-    exp_move = float(card_dict.get("expected_move_pct", 0.0) or 0.0)
-    exp_lo = float(card_dict.get("expected_low_pct", 0.0) or 0.0)
-    exp_hi = float(card_dict.get("expected_high_pct", 0.0) or 0.0)
-    m1d = float(card_dict.get("move_1d_pct", 0.0) or 0.0)
-    m1d_lo = float(card_dict.get("move_1d_low_pct", 0.0) or 0.0)
-    m1d_hi = float(card_dict.get("move_1d_high_pct", 0.0) or 0.0)
-    m1w = float(card_dict.get("move_1w_pct", exp_move) or exp_move)
-    m1w_lo = float(card_dict.get("move_1w_low_pct", exp_lo) or exp_lo)
-    m1w_hi = float(card_dict.get("move_1w_high_pct", exp_hi) or exp_hi)
-    m1m = float(card_dict.get("move_1m_pct", 0.0) or 0.0)
-    m1m_lo = float(card_dict.get("move_1m_low_pct", 0.0) or 0.0)
-    m1m_hi = float(card_dict.get("move_1m_high_pct", 0.0) or 0.0)
-    sharpe = float(card_dict.get("realized_sharpe_1y", 0.0) or 0.0)
-    last_close = float(card_dict.get("last_close", 0.0) or 0.0)
-    last_close_date = str(card_dict.get("last_close_date", "") or "")
-    last_intra = float(card_dict.get("last_intraday_price", 0.0) or 0.0)
-    last_intra_at = str(card_dict.get("last_intraday_at", "") or "")
-    coverage = card_dict.get("data_coverage", {}) or {}
-
-    # ---- header strip ----
-    gate_badge = (pill("gate: pass", "long") if passes
-                   else pill("gate: blocked", "short"))
-    header = (
-        f"<div class='signal-card' style='padding:14px 18px;margin-bottom:10px'>"
-        f"<div style='display:flex;justify-content:space-between;align-items:center;"
-        f"gap:14px;flex-wrap:wrap;'>"
-        f"<div>"
-        f"<div class='ticker' style='font-size:1.6rem'>{ticker}</div>"
-        f"<div class='meta'>{name} · {ac.upper()} · as of {asof}</div>"
-        f"</div>"
-        f"<div style='display:flex;gap:6px;flex-wrap:wrap;'>"
-        f"{pill('regime: '+rg, rg)} {gate_badge} "
-        f"{pill('model: '+model_kind.replace('_',' '), 'flat')}"
-        f"</div></div>"
-        + (f"<div class='meta' style='margin-top:6px'>gated out: {reasons}</div>"
-           if not passes and reasons else "")
-        + "</div>"
-    )
-    st.markdown(header, unsafe_allow_html=True)
-
-    # ---- RESULTS row: 4 metric cards ----
-    st.markdown("##### Results")
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        # Use a coloured pill above the metric for direction
-        st.markdown(f"<div style='margin-bottom:4px'>{pill(label, kind)}</div>",
-                    unsafe_allow_html=True)
-        st.metric("Direction (5-day)", label,
-                  delta=f"proba_up {proba_up:.3f}", delta_color="off")
-    with m2:
-        sign = "+" if m1w >= 0 else ""
-        st.metric(
-            "Expected move (5d)",
-            f"{sign}{m1w:.2f}%",
-            delta=f"band: {m1w_lo:+.2f}% / {m1w_hi:+.2f}%",
-            delta_color="off",
-        )
-    with m3:
-        st.metric(
-            "Conviction",
-            f"{conviction:.0f} / 100",
-            delta=f"blended p {blended:.3f}",
-            delta_color="off",
-        )
-    with m4:
-        st.metric(
-            "1y realised Sharpe",
-            f"{sharpe:.2f}",
-            delta="annualised, rf=0",
-            delta_color="off",
-        )
-
-    # ---- HORIZON projections table ----
-    if last_close > 0:
-        currency = "₹" if ac == "india" else ("$" if ac in ("us", "crypto") else "")
-        rows_h = [
-            ("Tomorrow",       "1 trading day",  m1d, m1d_lo, m1d_hi),
-            ("Next week",      "5 trading days", m1w, m1w_lo, m1w_hi),
-            ("Next month",     "21 trading days", m1m, m1m_lo, m1m_hi),
-        ]
-        st.markdown("##### Horizon projections")
-        h_html = (
-            "<table style='width:100%;font-size:0.88rem;border-collapse:collapse;"
-            "margin-top:4px'>"
-            "<thead><tr style='color:var(--text-muted);text-align:left'>"
-            "<th style='padding:6px 8px'>Horizon</th>"
-            "<th style='padding:6px 8px'>Expected move</th>"
-            "<th style='padding:6px 8px'>Target price</th>"
-            "<th style='padding:6px 8px'>Range (±1σ)</th>"
-            "</tr></thead><tbody>"
-        )
-        for label_h, sublabel, mu, lo, hi in rows_h:
-            tgt = last_close * (1 + mu / 100)
-            tgt_lo = last_close * (1 + lo / 100)
-            tgt_hi = last_close * (1 + hi / 100)
-            mu_color = ("#22c55e" if mu > 0.05
-                         else "#ef4444" if mu < -0.05
-                         else "#94a3b8")
-            sign = "+" if mu >= 0 else ""
-            h_html += (
-                f"<tr style='border-top:1px solid rgba(148,163,184,0.12)'>"
-                f"<td style='padding:8px'><b>{label_h}</b><br>"
-                f"<span class='meta' style='font-size:0.74rem'>{sublabel}</span></td>"
-                f"<td style='padding:8px;font-family:JetBrains Mono,monospace;"
-                f"color:{mu_color};font-weight:600'>{sign}{mu:.2f}%</td>"
-                f"<td style='padding:8px;font-family:JetBrains Mono,monospace'>"
-                f"{currency}{tgt:,.2f}</td>"
-                f"<td style='padding:8px;font-family:JetBrains Mono,monospace;"
-                f"color:var(--text-muted);font-size:0.82rem'>"
-                f"{currency}{tgt_lo:,.2f} – {currency}{tgt_hi:,.2f}"
-                f" ({lo:+.2f}% / {hi:+.2f}%)</td></tr>"
-            )
-        h_html += "</tbody></table>"
-        st.markdown(h_html, unsafe_allow_html=True)
-        st.caption(
-            "Drift extrapolated linearly from the 5-day model edge; "
-            "±1σ band uses realised daily vol. 1d and 1m are first-order "
-            "estimates — the model is calibrated on the 5-day horizon."
-        )
-
-    # ---- price strip (current price + intraday only; targets are in horizon table) ----
-    if last_close > 0:
-        currency = "₹" if ac == "india" else ("$" if ac in ("us", "crypto") else "")
-        intraday_html = ""
-        if last_intra > 0 and last_intra_at:
-            intraday_html = (
-                f" · <span style='color:var(--text-muted);font-size:0.82rem'>"
-                f"intraday: <b>{currency}{last_intra:,.2f}</b> @ {last_intra_at[:16]}</span>"
-            )
-        st.markdown(
-            f"<div class='signal-card' style='padding:10px 14px;margin-top:10px;"
-            f"font-size:0.9rem'>"
-            f"<span class='meta'>last close</span> "
-            f"<b>{currency}{last_close:,.2f}</b> "
-            f"<span class='meta'>({last_close_date})</span>{intraday_html}"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ---- proba_up bar ----
-    pu_pct = max(0.0, min(100.0, proba_up * 100))
-    bp_pct = max(0.0, min(100.0, blended * 100))
-    st.markdown(
-        f"<div style='margin:14px 0 4px 0;font-size:0.78rem;color:var(--text-muted);"
-        f"display:flex;justify-content:space-between'>"
-        f"<span>0.00 (bearish)</span><span>0.50</span><span>1.00 (bullish)</span></div>"
-        f"<div style='position:relative;height:8px;background:rgba(148,163,184,0.2);"
-        f"border-radius:4px'>"
-        f"<div style='position:absolute;left:50%;top:-3px;width:1px;height:14px;"
-        f"background:rgba(148,163,184,0.5)'></div>"
-        f"<div style='position:absolute;left:0;top:0;height:8px;width:{pu_pct:.1f}%;"
-        f"background:linear-gradient(90deg,#22d3ee,#8b5cf6);border-radius:4px;"
-        f"opacity:0.85'></div>"
-        f"<div style='position:absolute;left:{bp_pct:.1f}%;top:-2px;width:3px;"
-        f"height:12px;background:#fbbf24'></div>"
-        f"</div>"
-        f"<div style='display:flex;justify-content:space-between;font-size:0.72rem;"
-        f"color:var(--text-muted);margin-top:4px;font-family:JetBrains Mono,monospace'>"
-        f"<span>proba_up = {proba_up:.3f}</span>"
-        f"<span style='color:#fbbf24'>blended = {blended:.3f}</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ---- why text ----
-    if why:
-        st.markdown(
-            f"<div class='signal-card' style='margin-top:14px;padding:12px 14px;"
-            f"line-height:1.55;font-size:0.92rem'>{why}</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ---- pillars chart ----
-    pillars = card_dict.get("pillars", {}) or {}
-    pdf = pd.DataFrame({"pillar": list(pillars.keys()),
-                        "score": list(pillars.values())}).dropna()
-    if not pdf.empty:
-        st.markdown("##### Rubric pillars")
-        try:
-            colors = ["#06b6d4", "#8b5cf6", "#ec4899", "#22d3ee"]
-            fig = go.Figure(go.Bar(
-                x=pdf["pillar"], y=pdf["score"],
-                marker=dict(color=colors[: len(pdf)],
-                            line=dict(color="rgba(255,255,255,0.15)", width=1)),
-                hovertemplate="%{x}: %{y:.0f}<extra></extra>",
-            ))
-            fig.update_layout(**_plotly_layout(height=180,
-                              yaxis=dict(range=[0, 100],
-                                         gridcolor="rgba(148,163,184,0.15)",
-                                         zeroline=False),
-                              xaxis=dict(zeroline=False)))
-            st.plotly_chart(fig, width='stretch',
-                            config={"displayModeBar": False})
-        except ImportError:
-            st.bar_chart(pdf, x="pillar", y="score", height=180)
-
-    if fold_aucs:
-        st.caption(
-            "deep-analysis fold AUCs: "
-            + " · ".join(f"{a:.3f}" for a in fold_aucs)
-            + f" (mean {sum(fold_aucs)/len(fold_aucs):.3f})"
-        )
-
-    # ---- side-by-side expanders: Data collected | News ----
-    e_data, e_news = st.columns(2)
-    with e_data:
-        n_news = int(coverage.get("news_count", len(card_dict.get("news_top5") or [])))
-        with st.expander("Data collected for this ticker", expanded=False):
-            rows = [
-                ("price rows",
-                 f"{int(coverage.get('price_rows', 0)):,}"),
-                ("price range",
-                 f"{coverage.get('price_first_date','—')}  →  "
-                 f"{coverage.get('price_last_date','—')}"),
-                ("history",
-                 f"{coverage.get('history_years', 0):.1f} years"),
-                ("price sources",
-                 ", ".join(coverage.get("prices_sources") or []) or "—"),
-                ("fundamentals fields",
-                 f"{int(coverage.get('fundamentals_fields', 0))}"),
-                ("fundamentals sources",
-                 ", ".join(coverage.get("fundamentals_sources") or []) or "—"),
-                ("news headlines",
-                 f"{n_news}"),
-                ("news sources",
-                 ", ".join(coverage.get("news_sources") or []) or "—"),
-                ("macro fresh",
-                 "✅" if coverage.get("macro_fresh") else "❌"),
-                ("regime fresh",
-                 "✅" if coverage.get("regime_fresh") else "❌"),
-                ("data quality",
-                 f"{int(coverage.get('data_quality_score', 0))} / 100"),
-                ("realised vol (5d horizon)",
-                 f"{float(card_dict.get('recent_vol_5d_pct',0.0)):.2f}%"),
-            ]
-            tbl = "<table style='width:100%;font-size:0.86rem;border-collapse:collapse'>"
-            for k, v in rows:
-                tbl += (
-                    f"<tr><td style='padding:4px 0;color:var(--text-muted);"
-                    f"width:48%'>{k}</td>"
-                    f"<td style='padding:4px 0;font-family:JetBrains Mono,monospace'>"
-                    f"{v}</td></tr>"
-                )
-            tbl += "</table>"
-            st.markdown(tbl, unsafe_allow_html=True)
-
-    with e_news:
-        news = card_dict.get("news_top5") or []
-        with st.expander(f"News ({len(news)} headlines)", expanded=False):
-            if not news:
-                st.caption("No news pulled this round.")
-            for n in news:
-                s = float(n.get("sent_score", 0) or 0)
-                color = "#22c55e" if s > 0.2 else ("#ef4444" if s < -0.2 else "#94a3b8")
-                st.markdown(
-                    f"<div style='padding:6px 0;border-bottom:1px solid rgba(148,163,184,0.12)'>"
-                    f"<a href='{n.get('url','')}' style='color:var(--text-primary);"
-                    f"text-decoration:none' target='_blank'>{n.get('title','')}</a>"
-                    f" <span style='color:{color};font-family:JetBrains Mono,monospace;"
-                    f"font-size:0.72rem'>({s:+.2f})</span>"
-                    f" <span style='color:var(--text-muted);font-size:0.72rem'>"
-                    f"{n.get('source','')}</span></div>",
-                    unsafe_allow_html=True,
-                )

@@ -41,7 +41,8 @@ PRED_PATH = _DATA / "predictions" / "latest.parquet"
 SIGNAL_PATH = _DATA / "signals" / "latest.parquet"
 REGIME_PATH = _DATA / "regime" / "latest.parquet"
 BACKTEST_PATH = _DATA / "backtest" / "summary.json"
-FEATURE_PATH = _DATA / "features" / "latest.parquet"
+# Phase 24.13 — was also exposing FEATURE_PATH via reload_keys()["features"]
+# but no caller ever read it. Removed.
 
 
 def _mtime(p: Path) -> float:
@@ -58,7 +59,7 @@ def _looks_like_synth_test(df: pd.DataFrame) -> bool:
     return bool(tickers) and tickers.issubset({"AAA", "BBB", "CCC", "DDD", "EEE"})
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_predictions(_mt: float = 0.0) -> pd.DataFrame:
     if PRED_PATH.exists():
         df = pd.read_parquet(PRED_PATH)
@@ -68,7 +69,7 @@ def load_predictions(_mt: float = 0.0) -> pd.DataFrame:
     return _demo_predictions()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_signals(_mt: float = 0.0) -> pd.DataFrame:
     if SIGNAL_PATH.exists():
         df = pd.read_parquet(SIGNAL_PATH)
@@ -78,14 +79,14 @@ def load_signals(_mt: float = 0.0) -> pd.DataFrame:
     return _demo_signals()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_regime(_mt: float = 0.0) -> pd.DataFrame:
     if REGIME_PATH.exists():
         return pd.read_parquet(REGIME_PATH)
     return _demo_regime()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_backtest_summary(_mt: float = 0.0) -> dict:
     import json
     if BACKTEST_PATH.exists():
@@ -101,7 +102,6 @@ def reload_keys() -> dict:
         "signals": _mtime(SIGNAL_PATH),
         "regime": _mtime(REGIME_PATH),
         "backtest": _mtime(BACKTEST_PATH),
-        "features": _mtime(FEATURE_PATH),
     }
 
 

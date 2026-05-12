@@ -47,10 +47,13 @@ class MarqueeItem:
         return f'<span>{self.label}</span><b class="{cls}">{self.value}</b>'
 
 
-# Last-known-good fallback so the marquee NEVER goes blank, even if yfinance
-# is offline or rate-limited. Updated whenever a live fetch succeeds.
-_FALLBACK: list["MarqueeItem"] = []
-_LAST_GOOD: list["MarqueeItem"] = []
+# Phase 24.12 — last-known-good cache moved to st.session_state. Was a
+# module-level mutable list mutated inside @st.cache_data, which created
+# subtle cross-session races (multiple Streamlit threads share one process)
+# AND was unreachable when the cache hit (the body never ran on hits, so
+# the module-level fallback could be stale indefinitely). Session-state
+# storage is per-user-session and updates on every cache miss/refresh.
+_LAST_GOOD_KEY = "__marquee_last_good"
 
 
 def _safe_quote(symbol: str) -> tuple[float, float] | None:
@@ -67,7 +70,10 @@ def _safe_quote(symbol: str) -> tuple[float, float] | None:
         prev = float(info.get("previous_close") or info.get("regular_market_previous_close") or 0.0)
         if last > 0 and prev > 0:
             return last, prev
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # yfinance fast_info is best-effort; fall through to history path.
+        # Logging at WARNING here would spam since it fails on weekends /
+        # for delisted tickers as a matter of course.
         pass
     # fallback: 2d history
     try:
@@ -76,7 +82,10 @@ def _safe_quote(symbol: str) -> tuple[float, float] | None:
             return float(h["Close"].iloc[-1]), float(h["Close"].iloc[-2])
         if len(h) == 1:
             return float(h["Close"].iloc[-1]), float(h["Open"].iloc[-1])
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Final fallback path; caller treats None as "no data" and skips
+        # the symbol in the marquee. Logging would spam during yfinance
+        # outages so we stay silent by design.
         pass
     return None
 
@@ -120,13 +129,13 @@ def fetch_marquee_data() -> list[MarqueeItem]:
         out.append(MarqueeItem(label=label, value=v, direction=d))
 
     # If MORE THAN HALF failed, prefer last-known-good if we have it.
-    global _LAST_GOOD
+    last_good = st.session_state.get(_LAST_GOOD_KEY)
     if failed > len(_TICKERS) // 2:
-        if _LAST_GOOD:
-            return _LAST_GOOD
+        if last_good:
+            return last_good
         # else: return whatever we got (mostly em-dashes is still visible)
     else:
-        _LAST_GOOD = out  # remember good fetch
+        st.session_state[_LAST_GOOD_KEY] = out  # remember good fetch
     return out
 
 

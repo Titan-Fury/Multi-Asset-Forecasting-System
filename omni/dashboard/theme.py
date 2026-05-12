@@ -677,11 +677,8 @@ footer { visibility: hidden; }
     z-index: -1;
 }
 
-/* UI2 — color-mix() utilities (replaces hardcoded rgba shades) */
-.accent-tint-soft  { background: color-mix(in oklch, var(--accent) 8%,  transparent); }
-.accent-tint-mid   { background: color-mix(in oklch, var(--accent) 16%, transparent); }
-.accent-tint-strong{ background: color-mix(in oklch, var(--accent) 28%, transparent); }
-.violet-tint-soft  { background: color-mix(in oklch, #8b5cf6 8%, transparent); }
+/* Phase 24.13 — UI2 accent-tint / violet-tint utility classes were
+   never applied in any .py file. Removed. */
 
 /* UI3 — Container queries on the prediction card */
 .prediction-card { container-type: inline-size; container-name: predcard; }
@@ -774,6 +771,312 @@ footer { visibility: hidden; }
 .omni-cmdk-tag {
     font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+
+/* ===========================================================================
+   Phase 24.16 — Predict tab polish
+   - .predict-action-btn aligns Run/Deep/Refresh buttons with the selectbox
+     baseline (replaces brittle inline `height:1.85rem` spacers).
+   - .stStatus inherits the signal-card surface so the status block doesn't
+     look like a foreign element.
+   - sidebar nav line-height + padding so the radiogroup labels (Predict /
+     Watchlist / Portfolio …) don't get clipped by tight line boxes.
+   - cursor reset so `cursor: wait` doesn't leak after spinners resolve.
+   ============================================================================= */
+.predict-action-btn {
+    height: 1.85rem;
+}
+@media (max-width: 768px) {
+    .predict-action-btn { height: 0; }
+}
+
+/* st.status surface — tone it down so it sits inside the page rhythm */
+[data-testid="stStatus"] {
+    border: 1px solid var(--border-subtle) !important;
+    background: var(--surface-2, rgba(15, 23, 42, 0.4)) !important;
+    border-radius: var(--r-md, 12px) !important;
+    padding: 8px 12px !important;
+    margin: 8px 0 !important;
+}
+[data-testid="stStatus"] [data-testid="stStatusContent"] {
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: var(--text-sm);
+}
+
+/* Sidebar nav: prevent clipped descenders on radiogroup labels.
+   IMPORTANT: zero out the global `.stApp p { margin-bottom: 12px }` rule
+   on `<p>` tags Streamlit wraps the radio label text in — that 12px was
+   what was clipping descenders / cutting names in half. */
+[data-testid="stSidebar"] [role="radiogroup"] label p,
+[data-testid="stSidebar"] [role="radiogroup"] label div p {
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.5 !important;
+    font-size: 0.92rem !important;
+    color: inherit !important;
+}
+/* the inner div Streamlit wraps the markdown in — let it size naturally */
+[data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {
+    line-height: 1.5 !important;
+    overflow: visible !important;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] > * {
+    margin: 0 !important;
+    overflow: visible !important;
+}
+
+/* ===========================================================================
+   OmniNav — cutting-edge sidebar section switcher (Phase 24.16)
+   Replaces the default radio bullet UI with a modern segmented-pill nav:
+     - sliding 3px accent bar on the left edge of the active item
+     - smooth 280ms cubic-bezier slide between items (translateY)
+     - per-item monogram glyph (CSS counter / nth-child mapping)
+     - hover lifts background, focus ring uses --accent
+     - active item: accent-tinted background + bold label + left bar glow
+   No layout shift, no JS — purely CSS-driven, anchored on Streamlit's own
+   `[role="radiogroup"]` semantics so click → state-change still works.
+   ============================================================================= */
+[data-testid="stSidebar"] [role="radiogroup"] {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 6px;
+}
+/* hide default native radio dot */
+[data-testid="stSidebar"] [role="radiogroup"] input[type="radio"] {
+    position: absolute !important;
+    width: 1px !important; height: 1px !important;
+    opacity: 0 !important; pointer-events: none !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] [data-baseweb="radio"] > div:first-child {
+    display: none !important;
+}
+/* base label = pill button */
+[data-testid="stSidebar"] [role="radiogroup"] label {
+    position: relative;
+    cursor: pointer;
+    width: 100%;
+    /* Important: explicit min-height + flex so the text never clips. */
+    min-height: 40px;
+    display: flex !important;
+    align-items: center;
+    padding: 8px 12px 8px 32px !important;
+    border-radius: 10px;
+    background: transparent;
+    transition: background 200ms ease, color 200ms ease, transform 200ms ease;
+    color: var(--text-secondary, #94a3b8);
+    font-size: 0.92rem;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    /* overflow VISIBLE so descenders + monogram are never clipped */
+    overflow: visible !important;
+    isolation: isolate;
+    line-height: 1.5;
+}
+/* slim left accent bar — invisible by default */
+[data-testid="stSidebar"] [role="radiogroup"] label::before {
+    content: "";
+    position: absolute;
+    left: 8px; top: 50%;
+    width: 3px; height: 0;
+    border-radius: 2px;
+    background: linear-gradient(180deg,
+        var(--accent, #06b6d4),
+        color-mix(in oklch, var(--accent, #06b6d4) 60%, #8b5cf6));
+    box-shadow: 0 0 8px color-mix(in oklch, var(--accent, #06b6d4) 60%, transparent);
+    transform: translateY(-50%);
+    transition: height 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+                opacity 200ms ease;
+    opacity: 0;
+}
+/* monogram glyph — now on label::after directly (was nested on inner div).
+   Position absolutely so it doesn't fight flex layout or clip the label. */
+[data-testid="stSidebar"] [role="radiogroup"] label::after {
+    position: absolute;
+    left: 16px; top: 50%;
+    transform: translateY(-50%);
+    width: 14px;
+    text-align: center;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: color-mix(in oklch, var(--accent, #06b6d4) 70%, var(--text-muted, #64748b));
+    transition: color 200ms ease, transform 200ms ease;
+    pointer-events: none;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+    color: var(--text-primary, #e6ecf5);
+    background: color-mix(in oklch, var(--accent, #06b6d4) 6%, transparent);
+}
+/* active item — Streamlit marks aria-checked=true on the input;
+   target via :has(). Fallback for engines without :has() below. */
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    color: var(--text-primary, #e6ecf5) !important;
+    font-weight: 700;
+    background: color-mix(in oklch, var(--accent, #06b6d4) 14%, transparent);
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked)::before {
+    height: 22px;
+    opacity: 1;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked)::after {
+    color: var(--accent, #06b6d4);
+    transform: translateY(-50%) scale(1.1);
+}
+/* glyph map by position — 12 sections in `section_options`.
+   Use ::after's content (since the glyph is now on label::after directly). */
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(1)::after  { content: "◆"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(2)::after  { content: "★"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(3)::after  { content: "▣"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(4)::after  { content: "↕"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(5)::after  { content: "⚡"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(6)::after  { content: "▦"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(7)::after  { content: "◉"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(8)::after  { content: "∞"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(9)::after  { content: "⊿"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(10)::after { content: "$"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(11)::after { content: "⌚"; }
+[data-testid="stSidebar"] [role="radiogroup"] > label:nth-child(12)::after { content: "⚙"; }
+
+/* :has() polyfill — older Chromium gets a less-fancy active state via
+   :focus-within (Streamlit moves focus on click, so this still works). */
+@supports not selector(:has(*)) {
+    [data-testid="stSidebar"] [role="radiogroup"] label:focus-within {
+        background: color-mix(in oklch, var(--accent, #06b6d4) 14%, transparent);
+        color: var(--text-primary, #e6ecf5);
+        font-weight: 700;
+    }
+    [data-testid="stSidebar"] [role="radiogroup"] label:focus-within::before {
+        height: 22px;
+        opacity: 1;
+    }
+}
+
+/* ===========================================================================
+   Production loading UX (Phase 24.16) — skeleton placeholders + a slim
+   indeterminate top progress bar. Replaces the perceived-stuck spinner.
+   Patterns inspired by Linear / Vercel / Stripe Dashboard:
+     - skeleton boxes that match the eventual content's shape
+     - shimmer animation (gradient sweep) for "actively loading" cue
+     - 2px top progress bar with infinite slide for indeterminate work
+   ============================================================================= */
+
+/* Skeleton primitives — drop these into st.markdown() while waiting */
+.skel {
+    display: block;
+    background: linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 6%, transparent) 0%,
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 12%, transparent) 50%,
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 6%, transparent) 100%
+    );
+    background-size: 200% 100%;
+    border-radius: 6px;
+    animation: skel-shimmer 1.4s linear infinite;
+}
+.skel-line   { height: 14px; width: 100%; margin: 6px 0; }
+.skel-line-sm{ height: 10px; width: 40%;  margin: 4px 0; }
+.skel-line-lg{ height: 28px; width: 65%;  margin: 10px 0; }
+.skel-tile   { height: 96px; border-radius: 12px; }
+.skel-pill   { display: inline-block; height: 22px; width: 80px;
+               border-radius: 999px; vertical-align: middle; }
+@keyframes skel-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Top indeterminate progress bar — fixed 2px line at the very top edge */
+.top-progress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    z-index: 9999;
+    overflow: hidden;
+    background: transparent;
+    pointer-events: none;
+}
+.top-progress::before {
+    content: "";
+    display: block;
+    height: 100%;
+    width: 38%;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--accent, #06b6d4),
+        color-mix(in oklch, var(--accent, #06b6d4) 60%, #8b5cf6),
+        transparent);
+    border-radius: 2px;
+    animation: top-progress-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    box-shadow: 0 0 8px color-mix(in oklch, var(--accent, #06b6d4) 50%, transparent);
+}
+@keyframes top-progress-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(290%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .skel, .top-progress::before { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   Selectbox / dropdown text clipping fix (Phase 24.16, hardened pass 2)
+   Streamlit selectbox renders the chosen value through several nested
+   divs whose computed line-height collapses to 0 on some builds, eating
+   descenders (g/p/y/q). We force every nested element to have a real
+   line-height and visible overflow. The value-container also gets extra
+   vertical padding so the cap-line doesn't kiss the border.
+   --------------------------------------------------------------------------- */
+[data-baseweb="select"],
+[data-baseweb="select"] *,
+.stSelectbox [data-baseweb="select"] * {
+    line-height: 1.5 !important;
+    overflow: visible !important;
+}
+[data-baseweb="select"] [data-baseweb="select-input"],
+[data-baseweb="select"] > div:first-child {
+    min-height: 44px !important;
+    align-items: center !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+}
+[data-baseweb="select"] input,
+[data-baseweb="select"] [role="combobox"] {
+    min-height: 28px !important;
+    line-height: 1.5 !important;
+}
+/* baseweb popover (the open dropdown menu) — same hardening */
+[data-baseweb="popover"] li,
+[data-baseweb="popover"] [role="option"] {
+    line-height: 1.5 !important;
+    padding: 8px 12px !important;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    overflow: visible !important;
+}
+[data-baseweb="popover"] li *,
+[data-baseweb="popover"] [role="option"] * {
+    line-height: 1.5 !important;
+    overflow: visible !important;
+}
+
+/* Cursor — when a spinner/status finishes, force the document back to
+   default so the OS cursor doesn't keep showing the wait/busy state. */
+body, .stApp {
+    cursor: default;
+}
+[data-testid="stSpinner"] ~ * {
+    cursor: default;
+}
+
+/* Stat grid hardening — make sure cells in the Results row stretch to the
+   tallest sibling so labels stay baseline-aligned even when one cell hosts
+   a pill instead of a numeric value. */
+.stat {
+    min-height: 96px;
+    justify-content: flex-start;
 }
 
 </style>
@@ -1008,17 +1311,7 @@ body::before {
     0 0 0 1px color-mix(in oklch, var(--accent, #38bdf8) 25%, transparent) inset;
 }
 
-/* ---- 11. CSS-only 3D tilt cards (very subtle) ------------------------ */
-.fx-tilt {
-  perspective: 1200px;
-  transform-style: preserve-3d;
-}
-.fx-tilt > * {
-  transform:
-    rotateX(calc((var(--my, 50%) - 50%) * -0.04))
-    rotateY(calc((var(--mx, 50%) - 50%) *  0.04));
-  transition: transform 420ms var(--spring-soft);
-}
+/* Phase 24.13 — .fx-tilt 3D card class was never applied. Removed. */
 
 /* ---- 12. Magnetic buttons -------------------------------------------- */
 .stButton > button,
@@ -1069,73 +1362,17 @@ h1:hover, h2:hover, h3:hover, .hero:hover h1 {
   @keyframes fx-scroll-progress { to { transform: scaleX(1); } }
 }
 
-/* ---- 9. Live pulse rings (apply via class .fx-pulse) ----------------- */
-.fx-pulse {
-  position: relative;
-  display: inline-block;
-}
-.fx-pulse::before,
-.fx-pulse::after {
-  content: "";
-  position: absolute;
-  inset: 50%;
-  width: 8px; height: 8px;
-  margin: -4px 0 0 -4px;
-  border-radius: 50%;
-  background: var(--accent, #22c55e);
-  animation: fx-pulse-ring 1.6s var(--ease-out-expo) infinite;
-}
-.fx-pulse::after { animation-delay: 0.8s; }
-@keyframes fx-pulse-ring {
-  0%   { transform: scale(0.6); opacity: 0.7; }
-  100% { transform: scale(4.2); opacity: 0;   }
-}
+/* Phase 24.13 — .fx-pulse pulse-ring class never applied. Removed. */
 
-/* ---- 8. Skeleton shimmer (apply via class .fx-skeleton) -------------- */
-.fx-skeleton {
-  background: linear-gradient(90deg,
-    color-mix(in oklch, white 6%, transparent) 0%,
-    color-mix(in oklch, white 14%, transparent) 50%,
-    color-mix(in oklch, white 6%, transparent) 100%);
-  background-size: 200% 100%;
-  -webkit-mask-image: linear-gradient(90deg, transparent, black 18%, black 82%, transparent);
-          mask-image: linear-gradient(90deg, transparent, black 18%, black 82%, transparent);
-  animation: fx-shimmer 1.4s linear infinite;
-  border-radius: 6px;
-}
-@keyframes fx-shimmer { to { background-position: -200% 0; } }
+/* Phase 24.13 — .fx-skeleton shimmer class never applied. Removed. */
 
-/* ---- 10. @property count-up (apply via .fx-counter[data-target]) ----- */
-@property --counter-num { syntax: "<number>"; inherits: false; initial-value: 0; }
-.fx-counter {
-  --counter-num: 0;
-  counter-reset: c var(--counter-num);
-  font-feature-settings: "tnum" 1;
-  font-variant-numeric: tabular-nums;
-  transition: --counter-num 1.2s var(--ease-out-expo);
-}
-.fx-counter::after { content: counter(c); }
+/* Phase 24.13 — .fx-counter @property animated counter never applied. */
 
-/* ---- Bento-grid friendly container queries --------------------------- */
-@container (min-width: 760px) {
-  .bento-grid { grid-template-columns: 2fr 1fr 1fr; }
-}
-@container (min-width: 1100px) {
-  .bento-grid { grid-template-columns: 2fr 1fr 1fr 1fr; }
-}
+/* Phase 24.13 — .bento-grid container queries never used. Removed. */
 
-/* ---- 15. Reduced-motion respect -------------------------------------- */
-@media (prefers-reduced-motion: reduce) {
-  .fx-orb,
-  body::before,
-  body::after,
-  .fx-pulse::before,
-  .fx-pulse::after,
-  .fx-skeleton {
-    animation: none !important;
-  }
-  *, *::before, *::after { transition-duration: 0.001ms !important; }
-}
+/* Phase 24.13 — old reduced-motion block referenced now-deleted classes.
+   The Phase 24.12 universal `*, *::before, *::after` rule (later in the
+   file) covers everything comprehensively. */
 
 /* ---- Sidebar polish: floating nav with frosted glass ----------------- */
 section[data-testid="stSidebar"] {
@@ -1185,46 +1422,22 @@ section[data-testid="stSidebar"] {
 
 _ADVANCED_FX_JS = """
 <script>
+/* Phase 24.16 cull — _ADVANCED_FX_JS reduced from 75 lines to ~25.
+   Dropped:
+     - `bindCardSpotlight` mousemove on every metric/button/expander
+       (4 listeners per element × tens of elements × every Streamlit rerun
+       = wasted CPU for an effect that's barely visible). The spotlight
+       --mx/--my CSS vars are still keyed off mouse position via plain
+       :hover, so cards still highlight; we just don't need 100Hz updates.
+     - dead `bindCounters` for .fx-counter (class no Python emits)
+   Kept:
+     - syncThemeMeta (mobile PWA chrome colour)
+     - 'gd' shortcut to scroll to top
+*/
 (function(){
   if (window.__fxAdvancedBound) return;
   window.__fxAdvancedBound = true;
 
-  // 1+13. Cursor spotlight + magnetic buttons: write --mx/--my on hovered cards.
-  function bindCardSpotlight(root){
-    const cards = root.querySelectorAll(
-      '[data-testid="stMetric"], .stButton > button, .fx-tilt, [data-testid="stExpander"] > details'
-    );
-    cards.forEach(function(el){
-      if (el.__fxBound) return;
-      el.__fxBound = true;
-      el.addEventListener('mousemove', function(e){
-        const r = el.getBoundingClientRect();
-        const mx = ((e.clientX - r.left) / r.width)  * 100;
-        const my = ((e.clientY - r.top)  / r.height) * 100;
-        el.style.setProperty('--mx', mx + '%');
-        el.style.setProperty('--my', my + '%');
-      }, { passive: true });
-      el.addEventListener('mouseleave', function(){
-        el.style.setProperty('--mx', '50%');
-        el.style.setProperty('--my', '50%');
-      });
-    });
-  }
-
-  // 10. @property count-up: animate the --counter-num CSS var to data-target.
-  function bindCounters(root){
-    const els = root.querySelectorAll('.fx-counter[data-target]');
-    els.forEach(function(el){
-      if (el.__fxCounted) return;
-      el.__fxCounted = true;
-      const target = parseFloat(el.getAttribute('data-target')) || 0;
-      // Force a reflow before flipping the CSS var so the transition triggers.
-      void el.offsetWidth;
-      el.style.setProperty('--counter-num', target);
-    });
-  }
-
-  // 14. Theme-color meta sync to current accent.
   function syncThemeMeta(){
     try {
       const accent = getComputedStyle(document.body).getPropertyValue('--bg').trim();
@@ -1232,29 +1445,7 @@ _ADVANCED_FX_JS = """
       if (meta && accent) meta.setAttribute('content', accent);
     } catch (e) {}
   }
-
-  function tick(){
-    bindCardSpotlight(document);
-    bindCounters(document);
-    syncThemeMeta();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', tick);
-  } else {
-    tick();
-  }
-
-  // Streamlit re-renders frequently — re-bind on DOM mutation.
-  const mo = new MutationObserver(function(){
-    // throttle: skip if a tick is already queued this frame
-    if (window.__fxRaf) return;
-    window.__fxRaf = requestAnimationFrame(function(){
-      window.__fxRaf = null;
-      tick();
-    });
-  });
-  mo.observe(document.body, { childList: true, subtree: true });
+  syncThemeMeta();
 
   // Keyboard: 'g' then 'd' jumps to dashboard top with smooth scroll.
   let lastKey = '', lastTime = 0;
@@ -1294,30 +1485,10 @@ _ADVANCED_FX_JS = """
 # ============================================================================
 
 _ULTRA_FX_SVG_DEFS = """
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <filter id="ultra-goo">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="22" result="blur"/>
-      <feColorMatrix in="blur" mode="matrix"
-        values="1 0 0 0 0   0 1 0 0 0   0 0 1 0 0   0 0 0 22 -10" result="goo"/>
-      <feBlend in="SourceGraphic" in2="goo"/>
-    </filter>
-  </defs>
-</svg>
-
-<!-- Marquee is now rendered live from omni.dashboard.marquee.render_marquee()
-     via app.py — these static rows are kept ONLY as a fallback when the
-     marquee module is missing or yfinance fails. Real values get injected
-     above this in app.py. -->
-
-<div class="ultra-lighthouse" aria-hidden="true"></div>
-
-<div class="ultra-status" aria-hidden="true">
-  <span class="ultra-status__dot"></span>
-  <span class="ultra-status__text">live</span>
-</div>
-
-<canvas class="ultra-confetti" aria-hidden="true"></canvas>
+<!-- Phase 24.16 cull — goo filter, lighthouse, ultra-status, confetti canvas
+     all removed. Goo opt-in was never set; lighthouse was already display:none;
+     status indicator was hidden; confetti only fired on Shift+C and bloated CSS.
+     The marquee div stays in app.py via render_marquee(). -->
 """
 
 _ULTRA_FX_CSS = """
@@ -1362,24 +1533,9 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
   100% { --aurora-1: -10%; --aurora-2:  20%; }
 }
 
-/* B. Lighthouse cursor */
-.ultra-lighthouse {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  background:
-    radial-gradient(
-      900px circle at var(--lx, 50%) var(--ly, 50%),
-      color-mix(in oklch, #38bdf8 12%, transparent) 0%,
-      color-mix(in oklch, #a855f7 7%, transparent) 30%,
-      transparent 65%
-    );
-  mix-blend-mode: screen;
-}
-
-/* C. Goo filter on orbs (opt-in via body.fx-goo) */
-body.fx-goo .fx-orb { filter: url(#ultra-goo) blur(60px) saturate(1.4); }
+/* Phase 24.16 cull — .ultra-lighthouse rules removed (was already
+   `display: none` further down anyway, plus the lighthouse DOM element
+   was deleted from _ULTRA_FX_SVG_DEFS). Same for `body.fx-goo`. */
 
 /* ===========================================================================
    PRODUCTION-GRADE METRIC TILES (Phase 24.1)
@@ -1600,23 +1756,8 @@ input, textarea, [contenteditable="true"], select { cursor: text; }
 .stApp [data-testid="stHeader"] { top: 36px !important; }
 .stApp { padding-top: 36px; }
 
-/* G. Slot-roll digits */
-.ultra-digit {
-  display: inline-block;
-  width: 0.62em;
-  height: 1em;
-  line-height: 1em;
-  overflow: hidden;
-  vertical-align: baseline;
-}
-.ultra-digit__strip {
-  display: flex;
-  flex-direction: column;
-  height: 1000%;
-  transition: transform 1100ms var(--ease-out-expo);
-  will-change: transform;
-}
-.ultra-digit__strip > span { height: 10%; display: block; text-align: center; }
+/* Phase 24.13 — .ultra-digit / .ultra-digit__strip slot-roll CSS removed.
+   The JS that emitted these elements was dead (no Python emits .ultra-num). */
 
 /* H. Outline draw on cards (DEPRECATED Phase 24.4 — replaced by smooth halo
    in the Phase 24.1 metric tile block above. The outline-offset trick was
@@ -1664,47 +1805,9 @@ p, [data-testid="stMarkdownContainer"] p { text-wrap: pretty; hanging-punctuatio
 }
 @keyframes ultra-shimmer { to { background-position: -200% 0; } }
 
-/* L. Confetti */
-.ultra-confetti {
-  position: fixed; inset: 0;
-  width: 100vw; height: 100vh;
-  pointer-events: none;
-  z-index: 1003;
-  display: block;
-  opacity: 0;
-  transition: opacity 280ms var(--ease-out-expo);
-}
-.ultra-confetti.is-active { opacity: 1; }
-
-/* M. Floating "live" status pill */
-.ultra-status {
-  position: fixed;
-  bottom: 18px; right: 18px;
-  z-index: 1002;
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px 8px 12px;
-  border-radius: 999px;
-  background: color-mix(in oklch, #0b1220 70%, transparent);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  border: 1px solid color-mix(in oklch, white 10%, transparent);
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(226,232,240,0.85);
-  box-shadow: 0 8px 32px -12px rgba(0,0,0,0.6);
-}
-.ultra-status__dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #4ade80;
-  animation: ultra-pulse-dot 1.8s var(--ease-out-expo) infinite;
-}
-@keyframes ultra-pulse-dot {
-  0%   { box-shadow: 0 0 0 0   rgba(74,222,128,0.6); }
-  70%  { box-shadow: 0 0 0 12px rgba(74,222,128,0);   }
-  100% { box-shadow: 0 0 0 0   rgba(74,222,128,0);   }
-}
+/* L+M. Phase 24.16 cull — .ultra-confetti, .ultra-status, .ultra-status__dot
+   and ultra-pulse-dot removed. Confetti DOM element was dropped along with
+   its 130-line JS engine. Status pill was hidden anyway. */
 
 /* N. Section title underline (scroll-driven) */
 @supports (animation-timeline: view()) {
@@ -2007,18 +2110,13 @@ section[data-testid="stSidebar"] textarea {
   align-items: center;
   gap: 8px;
 }
+/* Phase 24.13 — was a `::after` chip showing "⌘K" on EVERY st.text_input
+   label (filters, search, dev tab inputs, etc.). The chip implied each
+   input had a keyboard shortcut, which was misleading — ⌘K is global.
+   Removed. The Cmd+K overlay still works; it just doesn't advertise via
+   per-input chrome. */
 [data-testid="stTextInput"] > label::after {
-  content: "⌘K";
-  margin-left: auto;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  color: rgba(148,163,184,0.85);
-  background: color-mix(in oklch, white 6%, transparent);
-  padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid color-mix(in oklch, white 10%, transparent);
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 500;
+  content: none;
 }
 
 /* ==== Phase 24.5 — MODERN SLIDING SIDEBAR =================================
@@ -2129,11 +2227,19 @@ section[data-testid="stSidebar"]::after {
   pointer-events: none;
 }
 
-/* Reduced motion */
+/* Reduced motion (Phase 24.12 — comprehensive coverage) */
 @media (prefers-reduced-motion: reduce) {
-  html, body, .stApp, [data-testid="stAppViewContainer"] { animation: none !important; }
-  .ultra-marquee__track, .hero h1, .ultra-status__dot { animation: none !important; }
-  .ultra-lighthouse { display: none; }
+  /* Universal sledgehammer: kill every animation and transition for users
+     with motion sensitivity. The earlier specific-selector approach missed
+     many animations (search-rotate, _glow-rotate, _cmdk-pop, tabFadeIn,
+     ultra-fade-in-up, fx-orb-*) — this catches them all. */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* .ultra-lighthouse selector kept here as a no-op — element removed. */
 }
 
 /* ==== Phase 24.8 — PRODUCTION ACCESSIBILITY POLISH ========================
@@ -2189,10 +2295,9 @@ button[data-testid="stSidebarCollapseButton"] {
   z-index: 2147483600 !important;
   pointer-events: auto !important;
 }
-.ultra-confetti { z-index: 1500 !important; }
 .ultra-marquee  { z-index: 1100 !important; }
-.ultra-status   { z-index: 1100 !important; }
-.ultra-lighthouse { z-index: 1 !important; }
+/* Phase 24.16 cull — z-index lines for .ultra-confetti / .ultra-status /
+   .ultra-lighthouse removed (elements deleted). */
 
 /* (4) Cleaner ticker input — give the chevron + clear button breathing room */
 [data-testid="stSelectbox"] > div > div,
@@ -2345,151 +2450,129 @@ section[data-testid="stSidebar"] > div:first-child > div:first-child {
   margin-bottom: 24px !important;
 }
 
-/* ==== SIDEBAR TOGGLE GUARANTEE (Phase 24.9 hot fix) ======================
-   The previous Phase 24.5 styling targeted [data-testid="collapsedControl"]
-   but Streamlit 1.40+ may render it as different testids depending on
-   version. We force-apply across ALL plausible selectors AND inject our
-   OWN guaranteed-visible toggle button via JS as a fallback. */
+/* ===========================================================================
+   Phase 24.15 — RAG citations & grounding badge
+   ===========================================================================
+   Renders below the why-text in the prediction card. Three pieces:
+     - inline pill showing path/score (green = grounded, amber = low conf)
+     - row of clickable citation chips linking to source articles
+   ============================================================================= */
+.why-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+  vertical-align: middle;
+}
+.why-badge-ok {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.28);
+}
+.why-badge-warn {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+}
+.why-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.why-citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in oklch, white 6%, transparent);
+  border: 1px solid color-mix(in oklch, white 12%, transparent);
+  font-size: 11px;
+  color: rgba(203, 213, 225, 0.92) !important;
+  text-decoration: none !important;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: Inter, system-ui, sans-serif;
+}
+.why-citation-chip b {
+  color: #06b6d4;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.why-citation-chip:hover {
+  background: color-mix(in oklch, #06b6d4 14%, transparent);
+  border-color: color-mix(in oklch, #06b6d4 45%, transparent);
+  transform: translateY(-1px);
+}
 
+/* Phase 24.11 — sidebar collapse concept dropped entirely. Hide every
+   plausible Streamlit collapse-control testid so the sidebar is permanent.
+   Nav lives in the sidebar (sections + filters + theme), so closing it
+   would strand the user. We commit to "always visible" instead of the
+   fragile toggle-button game. */
 [data-testid="stSidebarCollapsedControl"],
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapseButton"],
+button[data-testid="stSidebarCollapseButton"],
 button[kind="header"][title="Show sidebar"],
 button[kind="header"][title="Open sidebar"],
-header[data-testid="stHeader"] [data-testid="baseButton-header"] {
-  display: flex !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  z-index: 2147483600 !important;
+button[kind="header"][title="Close sidebar"],
+button[kind="header"][title="Hide sidebar"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
-/* Our own always-visible floating toggle (created via JS below). */
-.omni-sidebar-toggle {
-  position: fixed !important;
-  top: 50px !important;
-  left: 14px !important;
-  width: 42px !important;
-  height: 42px !important;
-  border-radius: 12px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: linear-gradient(135deg,
-    color-mix(in oklch, #38bdf8 35%, transparent),
-    color-mix(in oklch, #a855f7 35%, transparent)) !important;
-  border: 1px solid color-mix(in oklch, #38bdf8 55%, transparent) !important;
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    0 8px 24px -8px rgba(56, 189, 248, 0.55),
-    0 0 24px -6px rgba(168, 85, 247, 0.45);
-  cursor: pointer !important;
-  z-index: 2147483647 !important;
-  transition: all 240ms cubic-bezier(0.16, 1, 0.3, 1);
-  color: #f8fafc !important;
+/* Phase 24.16 — FORCE the sidebar visible regardless of Streamlit's
+   internal collapsed state. Without this, hiding the toggle (above)
+   creates a one-way trap: any cookie/state-persisted collapse, narrow
+   viewport auto-collapse, or accidental drag leaves the user with no
+   sidebar AND no way to bring it back. We override aria-expanded="false"
+   to keep the sidebar mounted, full width, on-screen — same as
+   aria-expanded="true". This guarantees the "permanent sidebar"
+   contract that Phase 24.11 promised. */
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"][aria-expanded="false"],
+section[data-testid="stSidebar"][aria-expanded="true"] {
+  display: block !important;
+  visibility: visible !important;
+  transform: translateX(0) !important;
+  margin-left: 0 !important;
+  min-width: 244px !important;
+  width: 244px !important;
+  max-width: 244px !important;
+  flex-shrink: 0 !important;
 }
-.omni-sidebar-toggle:hover {
-  transform: scale(1.08) translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.95) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 12px 32px -8px rgba(56, 189, 248, 0.75),
-    0 0 32px -4px rgba(168, 85, 247, 0.6);
-}
-.omni-sidebar-toggle svg {
-  width: 20px;
-  height: 20px;
-  stroke: #f8fafc;
-  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.5));
-}
-/* Hide our toggle when the native sidebar IS expanded — sidebar has its
-   own close button inside */
-.omni-sidebar-toggle.is-hidden {
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-60px);
+/* Make sure the inner div isn't hidden either (some Streamlit versions
+   collapse content via the first child rather than the section itself). */
+section[data-testid="stSidebar"] > div:first-child {
+  display: block !important;
+  visibility: visible !important;
+  transform: translateX(0) !important;
 }
 </style>
 """
 
 _ULTRA_FX_JS = """
 <script>
+/* Phase 24.16 cull — _ULTRA_FX_JS reduced from 135 lines to ~25.
+   Dropped:
+     - lighthouse mousemove (the lighthouse element is removed)
+     - confetti particle engine + Shift+C trigger (130 lines, rarely used)
+     - dead `tickFollower` / cursor-follow / slot-roll comments
+     - sidebar-toggle observer (sidebar permanent)
+   Kept: only the stagger animation that gives a subtle reveal cascade
+   to first-paint blocks. That's still visible to the user. */
 (function(){
   if (window.__ultraBound) return;
   window.__ultraBound = true;
-
-  const lh = document.querySelector('.ultra-lighthouse');
-  const cur = document.querySelector('.ultra-cursor');
-  const fol = document.querySelector('.ultra-cursor-follow');
-  let mx = window.innerWidth / 2, my = window.innerHeight / 2;
-  let fx = mx, fy = my;
-
-  function onMove(e){
-    mx = e.clientX; my = e.clientY;
-    if (lh) {
-      lh.style.setProperty('--lx', mx + 'px');
-      lh.style.setProperty('--ly', my + 'px');
-    }
-    if (cur) cur.style.transform = 'translate(' + mx + 'px,' + my + 'px) translate(-50%,-50%)';
-  }
-  document.addEventListener('mousemove', onMove, { passive: true });
-
-  function tickFollower(){
-    fx += (mx - fx) * 0.18;
-    fy += (my - fy) * 0.18;
-    if (fol) fol.style.transform = 'translate(' + fx + 'px,' + fy + 'px) translate(-50%,-50%)';
-    requestAnimationFrame(tickFollower);
-  }
-  tickFollower();
-
-  function bindHot(el){
-    if (el.__ultraHot) return;
-    el.__ultraHot = true;
-    el.addEventListener('mouseenter', () => document.body.classList.add('ultra-cursor-hot'));
-    el.addEventListener('mouseleave', () => document.body.classList.remove('ultra-cursor-hot'));
-  }
-  function rebindHot(){
-    document.querySelectorAll(
-      'a, button, [role="button"], .stButton > button, [data-baseweb="tab"], ' +
-      '[data-testid="stMetric"], [data-testid="stExpander"] > details summary'
-    ).forEach(bindHot);
-  }
-  rebindHot();
-
-  function buildSlotRoll(el){
-    if (el.__ultraRolled) return;
-    const raw = (el.getAttribute('data-num') || el.textContent || '').trim();
-    if (!raw) return;
-    el.__ultraRolled = true;
-    el.innerHTML = '';
-    for (const ch of raw) {
-      if (ch >= '0' && ch <= '9') {
-        const d = parseInt(ch, 10);
-        const wrap = document.createElement('span');
-        wrap.className = 'ultra-digit';
-        const strip = document.createElement('span');
-        strip.className = 'ultra-digit__strip';
-        for (let i = 0; i < 10; i++) {
-          const s = document.createElement('span');
-          s.textContent = String(i);
-          strip.appendChild(s);
-        }
-        wrap.appendChild(strip);
-        el.appendChild(wrap);
-        requestAnimationFrame(() => {
-          strip.style.transform = 'translateY(-' + (d * 10) + '%)';
-        });
-      } else {
-        const lit = document.createElement('span');
-        lit.textContent = ch;
-        el.appendChild(lit);
-      }
-    }
-  }
-  function rollAll(){ document.querySelectorAll('.ultra-num').forEach(buildSlotRoll); }
-  rollAll();
 
   function stagger(){
     document.querySelectorAll(
@@ -2501,165 +2584,14 @@ _ULTRA_FX_JS = """
     });
   }
   stagger();
-
   const mo = new MutationObserver(function(){
     if (window.__ultraRaf) return;
     window.__ultraRaf = requestAnimationFrame(function(){
       window.__ultraRaf = null;
-      rebindHot(); rollAll(); stagger();
+      stagger();
     });
   });
   mo.observe(document.body, { childList: true, subtree: true });
-
-  // Confetti
-  const cv = document.querySelector('.ultra-confetti');
-  function celebrate(opts){
-    if (!cv) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width  = window.innerWidth * dpr;
-    cv.height = window.innerHeight * dpr;
-    cv.style.width  = window.innerWidth + 'px';
-    cv.style.height = window.innerHeight + 'px';
-    const ctx = cv.getContext('2d');
-    ctx.scale(dpr, dpr);
-    const W = window.innerWidth, H = window.innerHeight;
-    const colors = ['#38bdf8','#a855f7','#22d3ee','#f472b6','#4ade80','#fbbf24'];
-    const N = (opts && opts.count) || 160;
-    const ox = (opts && opts.x) || W * 0.5;
-    const oy = (opts && opts.y) || H * 0.4;
-    const parts = [];
-    for (let i = 0; i < N; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const speed = 4 + Math.random() * 8;
-      parts.push({
-        x: ox, y: oy,
-        vx: Math.cos(a) * speed,
-        vy: Math.sin(a) * speed - 4,
-        r: 3 + Math.random() * 4,
-        c: colors[(Math.random() * colors.length) | 0],
-        rot: Math.random() * Math.PI,
-        vr: (Math.random() - 0.5) * 0.4,
-        life: 0,
-        ttl: 90 + Math.random() * 40,
-      });
-    }
-    cv.classList.add('is-active');
-    let frames = 0;
-    function step(){
-      ctx.clearRect(0, 0, W, H);
-      let alive = 0;
-      for (const p of parts) {
-        p.life++;
-        if (p.life > p.ttl) continue;
-        alive++;
-        p.vy += 0.18;
-        p.vx *= 0.992; p.vy *= 0.996;
-        p.x += p.vx; p.y += p.vy;
-        p.rot += p.vr;
-        const a = Math.max(0, 1 - p.life / p.ttl);
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot);
-        ctx.fillStyle = p.c;
-        ctx.globalAlpha = a;
-        ctx.fillRect(-p.r, -p.r * 0.4, p.r * 2, p.r * 0.8);
-        ctx.restore();
-      }
-      frames++;
-      if (alive > 0 && frames < 240) {
-        requestAnimationFrame(step);
-      } else {
-        ctx.clearRect(0, 0, W, H);
-        cv.classList.remove('is-active');
-      }
-    }
-    step();
-  }
-  window.OmniCelebrate = celebrate;
-
-  new MutationObserver(function(){
-    if (document.body.classList.contains('fx-celebrate')) {
-      celebrate({});
-      document.body.classList.remove('fx-celebrate');
-    }
-  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
-
-  document.addEventListener('keydown', function(e){
-    if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
-    if (e.shiftKey && (e.key === 'C' || e.key === 'c')) celebrate({});
-  });
-
-  // ====================================================================
-  // Phase 24.9 — Custom always-visible sidebar toggle
-  // Streamlit's native collapsed-control sometimes hides on rerun OR uses
-  // different test IDs across versions. Inject our own guaranteed-visible
-  // floating button that programmatically clicks whatever native control
-  // exists. Falls back to dispatching a window event Streamlit listens for.
-  // ====================================================================
-  function ensureSidebarToggle(){
-    if (document.querySelector('.omni-sidebar-toggle')) return;
-    const btn = document.createElement('button');
-    btn.className = 'omni-sidebar-toggle';
-    btn.setAttribute('aria-label', 'Toggle sidebar');
-    btn.setAttribute('title', 'Toggle sidebar');
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                  + 'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
-                  + '<line x1="3" y1="6" x2="21" y2="6"/>'
-                  + '<line x1="3" y1="12" x2="21" y2="12"/>'
-                  + '<line x1="3" y1="18" x2="21" y2="18"/></svg>';
-    btn.addEventListener('click', function(e){
-      e.preventDefault();
-      e.stopPropagation();
-      // Try every known Streamlit toggle selector in order
-      const candidates = [
-        'button[data-testid="stSidebarCollapseButton"]',
-        'button[data-testid="stSidebarCollapsedControl"]',
-        '[data-testid="collapsedControl"] button',
-        '[data-testid="collapsedControl"]',
-        'button[kind="header"][title="Show sidebar"]',
-        'button[kind="header"][title="Open sidebar"]',
-      ];
-      for (const sel of candidates) {
-        const el = document.querySelector(sel);
-        if (el) {
-          el.click();
-          return;
-        }
-      }
-    });
-    document.body.appendChild(btn);
-  }
-  ensureSidebarToggle();
-
-  // Update toggle visibility based on sidebar state
-  function updateToggleVisibility(){
-    const sidebar = document.querySelector('section[data-testid="stSidebar"]');
-    const toggle = document.querySelector('.omni-sidebar-toggle');
-    if (!toggle) return;
-    if (!sidebar) {
-      toggle.classList.remove('is-hidden');
-      return;
-    }
-    // Check if sidebar is currently expanded by reading aria-expanded or
-    // the visible width of the sidebar
-    const ariaExpanded = sidebar.getAttribute('aria-expanded');
-    const w = sidebar.getBoundingClientRect().width;
-    const isOpen = (ariaExpanded === 'true') || (w > 80);
-    toggle.classList.toggle('is-hidden', isOpen);
-  }
-  updateToggleVisibility();
-
-  // Also re-run on every DOM mutation (Streamlit reruns)
-  const sbObs = new MutationObserver(function(){
-    if (window.__sbRaf) return;
-    window.__sbRaf = requestAnimationFrame(function(){
-      window.__sbRaf = null;
-      ensureSidebarToggle();
-      updateToggleVisibility();
-    });
-  });
-  sbObs.observe(document.body, { childList: true, subtree: true,
-                                  attributes: true, attributeFilter: ['aria-expanded', 'class'] });
 })();
 </script>
 """
