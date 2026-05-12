@@ -1,6 +1,20 @@
 # Rubric scoring weights per market regime.
 # Each pillar produces a 0-100 score; the weighted sum yields the rubric total.
 # Weights per regime sum to 1.0.
+#
+# Phase 24.16 — 9-pillar rubric:
+#   1. technical        — momentum / trend / volatility / volume
+#   2. fundamental      — valuation / quality / leverage (yfinance + Screener)
+#   3. sentiment        — FinBERT-aggregated news + Reddit + GDelt
+#   4. macro            — VIX, yield curve, DXY, regime-aware
+#   5. microstructure   — gap, VWAP dev, ORB, volume z, last-hour return
+#   6. oi               — F&O PCR, max-pain dist, OI change (NSE F&O names)
+#   7. relative_strength — vs sector / market benchmarks; pair-signal alpha
+#   8. insider           — bulk/block deals, promoter holding delta, FII/DII
+#   9. earnings_momentum — revenue + earnings growth, EPS revisions, surprises
+#
+# Pillars return neutral 50 when their inputs are unavailable, so the
+# system degrades gracefully on names without a particular data source.
 
 pillars:
   technical:
@@ -11,36 +25,66 @@ pillars:
     description: "News + social + LLM-aggregated signal"
   macro:
     description: "Cross-asset regime, VIX, yield curve, DXY"
+  microstructure:
+    description: "Intraday flow: gap, VWAP dev, ORB, volume z, vol regime"
+  oi:
+    description: "F&O open-interest: PCR, max-pain dist, OI buildup"
+  relative_strength:
+    description: "RS vs sector + broad market; pair-signal forward alpha"
+  insider:
+    description: "Bulk/block deals, promoter holding delta, FII/DII flows"
+  earnings_momentum:
+    description: "Revenue + earnings growth, EPS revisions, surprises"
 
 regimes:
   bull:
     description: "Uptrend, low vol, positive breadth"
     weights:
-      technical: 0.40
-      fundamental: 0.20
-      sentiment: 0.25
-      macro: 0.15
+      technical: 0.20
+      fundamental: 0.12
+      sentiment: 0.14
+      macro: 0.08
+      microstructure: 0.12
+      oi: 0.10
+      relative_strength: 0.12
+      insider: 0.06
+      earnings_momentum: 0.06
   bear:
     description: "Downtrend, rising vol, negative breadth"
     weights:
-      technical: 0.30
-      fundamental: 0.30
-      sentiment: 0.15
-      macro: 0.25
+      technical: 0.16
+      fundamental: 0.16
+      sentiment: 0.08
+      macro: 0.18
+      microstructure: 0.10
+      oi: 0.10
+      relative_strength: 0.10
+      insider: 0.06
+      earnings_momentum: 0.06
   chop:
     description: "Range-bound, indecisive, mixed signals"
     weights:
-      technical: 0.25
-      fundamental: 0.30
-      sentiment: 0.30
-      macro: 0.15
+      technical: 0.14
+      fundamental: 0.16
+      sentiment: 0.16
+      macro: 0.08
+      microstructure: 0.12
+      oi: 0.10
+      relative_strength: 0.10
+      insider: 0.06
+      earnings_momentum: 0.08
   crisis:
     description: "VIX spike, correlations approach 1, deleveraging"
     weights:
-      technical: 0.15
-      fundamental: 0.20
-      sentiment: 0.20
-      macro: 0.45
+      technical: 0.08
+      fundamental: 0.10
+      sentiment: 0.10
+      macro: 0.30
+      microstructure: 0.10
+      oi: 0.10
+      relative_strength: 0.10
+      insider: 0.06
+      earnings_momentum: 0.06
 
 # Conviction gate: minimum score to emit a signal
 gating:

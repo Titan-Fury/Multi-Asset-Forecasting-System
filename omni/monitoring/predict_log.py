@@ -32,6 +32,13 @@ _SCHEMA_COLS = [
     "proba_up", "blended_p", "direction", "conviction",
     "expected_move_pct", "regime", "passes_gate",
     "data_quality_score", "model_trained_at",
+    # Phase 24.16 — per-pillar scores for explainability and drift tracking.
+    # Older snapshots written before this phase will be read back with NaN
+    # for these columns; the schema-coerce loop below pads missing fields.
+    "technical_score", "fundamental_score", "sentiment_score",
+    "macro_score", "microstructure_score", "oi_score",
+    "relative_strength_score", "insider_score", "earnings_momentum_score",
+    "rubric_total",
 ]
 
 
@@ -51,6 +58,9 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
         else:
             move_pct = float(card.get("move_1w_pct",
                                        card.get("expected_move_pct", 0.0)) or 0.0)
+        # Phase 24.16 — pull per-pillar scores from the card's `pillars`
+        # dict if present (gracefully None for older cards).
+        pillars = card.get("pillars") or {}
         row = {
             "logged_at": datetime.now(timezone.utc).isoformat(),
             "ticker": str(card.get("ticker", "")),
@@ -67,6 +77,18 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
             "passes_gate": bool(card.get("passes_gate", False)),
             "data_quality_score": int(provenance.get("data_quality_score", 0) or 0),
             "model_trained_at": str(card.get("model_trained_at", "")),
+            # New per-pillar fields. None instead of 0 so the analytics
+            # later can distinguish "missing" from "neutral 50".
+            "technical_score": float(pillars["technical"]) if "technical" in pillars else None,
+            "fundamental_score": float(pillars["fundamental"]) if "fundamental" in pillars else None,
+            "sentiment_score": float(pillars["sentiment"]) if "sentiment" in pillars else None,
+            "macro_score": float(pillars["macro"]) if "macro" in pillars else None,
+            "microstructure_score": float(pillars["microstructure"]) if "microstructure" in pillars else None,
+            "oi_score": float(pillars["oi"]) if "oi" in pillars else None,
+            "relative_strength_score": float(pillars["relative_strength"]) if "relative_strength" in pillars else None,
+            "insider_score": float(pillars["insider"]) if "insider" in pillars else None,
+            "earnings_momentum_score": float(pillars["earnings_momentum"]) if "earnings_momentum" in pillars else None,
+            "rubric_total": float(card.get("rubric_total", 0.0)) if card.get("rubric_total") is not None else None,
         }
         date_iso = datetime.now(timezone.utc).date().isoformat()
         path = _lake_paths.predictions_path(date_iso)
@@ -76,7 +98,9 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
             df = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
         else:
             df = pd.DataFrame([row])
-        # Coerce schema
+        # Coerce schema — pad any column missing from the (possibly older)
+        # existing file. None default lets analytics distinguish missing
+        # from explicit zero.
         for c in _SCHEMA_COLS:
             if c not in df.columns:
                 df[c] = None

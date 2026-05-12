@@ -6,8 +6,13 @@ Per ticker:
   3. Compute fundamental features (latest snapshot as-of each row date).
   4. Compute sentiment aggregates (lagged 1 trading day).
   5. Join macro features.
-  6. Compute forward-return targets (kept separate from feature columns).
-  7. Persist to features tier.
+  6. Compute MICROSTRUCTURE features (Phase 24.16):
+       - delivery_pct_z_60d, amihud_illiq_20d, signed_vol_proxy,
+         oi_change_pct_5d, fii_dii_net_z_20d, microstr_score
+     India equities only; non-India tickers get NaN columns so the
+     universal feature schema stays stable across asset classes.
+  7. Compute forward-return targets (kept separate from feature columns).
+  8. Persist to features tier.
 
 Anti-leakage rules enforced here:
   - Fundamentals are joined as `<= row.date` (never future snapshots).
@@ -19,10 +24,13 @@ Anti-leakage rules enforced here:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from omni.features import fundamental as _fund
 from omni.features import macro as _macro
+from omni.features import microstructure as _micro
 from omni.features import sentiment as _sent
 from omni.features import targets as _tgt
 from omni.features import technical as _tech
@@ -38,11 +46,30 @@ def is_target_col(c: str) -> bool:
     return c.startswith(_TARGET_PREFIX)
 
 
+def _load_oi_history(ticker: str) -> pd.DataFrame | None:
+    """Load per-ticker OI snapshot history from the lake. Phase 24.16 —
+    populated daily by `omni.orchestrator.daily` via the (now hardened)
+    NSE OI scraper. Returns None if the snapshot file isn't present."""
+    p = Path("data") / "lake" / "oi_snapshots" / f"{ticker.upper()}.parquet"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_parquet(p)
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+        return df
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"oi_history load failed for {ticker}: {e}")
+        return None
+
+
 def build_for_ticker(asset_class: str, ticker: str,
                      *,
                      fundamentals: pd.DataFrame | None = None,
                      sentiment: pd.DataFrame | None = None,
                      macro: pd.DataFrame | None = None,
+                     bhavcopy_df: pd.DataFrame | None = None,
+                     flows_df: pd.DataFrame | None = None,
                      horizons: tuple[int, ...] = (1, 5, 20),
                      persist: bool = True) -> pd.DataFrame:
     try:
@@ -82,6 +109,23 @@ def build_for_ticker(asset_class: str, ticker: str,
         m["date"] = pd.to_datetime(m["date"])
         out = out.merge(m, on="date", how="left")
 
+    # Phase 24.16 — microstructure features (India only; other asset classes
+    # get NaN columns so the universal schema stays stable). Reads OI
+    # history from the lake; passes through bhavcopy + flows if the caller
+    # preloaded them at universe-build scope (cheap to reuse).
+    try:
+        oi_hist = _load_oi_history(ticker) if asset_class == "india" else None
+        out = _micro.compute_microstructure(
+            out, asset_class=asset_class, ticker=ticker, prices=prices,
+            bhavcopy_df=bhavcopy_df, flows_df=flows_df,
+            intraday_bars=None,           # daily build doesn't have intraday
+            oi_history=oi_hist,
+        )
+    except Exception as e:  # noqa: BLE001
+        # Microstructure is opt-in / best-effort — never fail the whole build
+        # over it. The columns will be NaN for this ticker.
+        log.debug(f"microstructure compute skipped for {ticker}: {e}")
+
     # Targets (separate columns, leakage-safe)
     tg = _tgt.compute(prices, horizons=horizons)
     tg["date"] = pd.to_datetime(tg["date"])
@@ -99,15 +143,39 @@ def build_universe(*, horizons: tuple[int, ...] = (1, 5, 20)) -> dict[str, int]:
     Caller is responsible for providing prepared `fundamentals` / `sentiment` /
     `macro` frames if those should be joined; for v1 we recompute macro per
     call and skip sentiment until news has been scored externally.
+
+    Phase 24.16 — preload bhavcopy + FII/DII flows ONCE per universe-build
+    (country-wide signals broadcast across all India tickers). Avoids one
+    NSE fetch per ticker × 195 tickers.
     """
     cfg = universe()
     macro = _macro.compute()
+
+    # Preload once. Soft-fail: if either fetch dies, we just pass None to
+    # compute_microstructure which returns NaN for that signal but keeps the
+    # rest of the pillar working.
+    bhav = None
+    flows = None
+    try:
+        from omni.ingest.sources.nse_bhavcopy import latest_bhavcopy  # type: ignore
+        bhav = latest_bhavcopy()
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"bhavcopy preload skipped: {e}")
+    try:
+        from omni.ingest.sources.nse_flows import fii_dii_activity
+        flows = fii_dii_activity()
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"flows preload skipped: {e}")
 
     counts: dict[str, int] = {}
     for asset_class, spec in cfg["asset_classes"].items():
         for ticker in spec["tickers"]:
             try:
-                df = build_for_ticker(asset_class, ticker, macro=macro, horizons=horizons)
+                df = build_for_ticker(
+                    asset_class, ticker,
+                    macro=macro, bhavcopy_df=bhav, flows_df=flows,
+                    horizons=horizons,
+                )
                 counts[f"{asset_class}/{ticker}"] = len(df)
             except Exception as e:
                 log.error(f"feature build failed {asset_class}/{ticker}: {e}")
