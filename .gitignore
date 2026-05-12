@@ -73,3 +73,9 @@ tmp/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
+
+# --- Local-only working dirs ---
+scratch/
+plans/
+lightning_logs/
+
