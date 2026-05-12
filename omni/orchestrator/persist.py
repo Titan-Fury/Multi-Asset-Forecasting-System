@@ -36,6 +36,16 @@ _DATA = _ROOT / "data"
 
 
 def _atomic_write_parquet(df: pd.DataFrame, dst: Path) -> None:
+    """Write a parquet file atomically, with a read-back validation step.
+
+    Phase 24.16 — adds defensive validation so we never publish a corrupt
+    parquet to the dashboard tier. The previous implementation trusted
+    that `df.to_parquet` succeeded, but on rare occasions (interrupted
+    write, AV/quarantine, OS buffer issues) the file could end up with
+    valid PAR1 magic bytes but corrupt internal thrift metadata. We
+    validate by reading the metadata back BEFORE swapping into place.
+    Corrupt writes are quarantined under data/.quarantine/ for forensics.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".parquet", dir=str(dst.parent))
     os.close(fd)
@@ -47,6 +57,52 @@ def _atomic_write_parquet(df: pd.DataFrame, dst: Path) -> None:
             df = df.copy()
             df.attrs = {}
         df.to_parquet(tmp_path, index=False)
+
+        # ---- Validate the file before promoting to dst ----------------------
+        # pyarrow.parquet.read_metadata cheaply parses the footer; if the
+        # thrift-encoded metadata is corrupt we get OSError here BEFORE the
+        # swap, so the existing dst stays valid.
+        try:
+            import pyarrow.parquet as _pq  # type: ignore
+            md = _pq.read_metadata(tmp_path)
+            if md.num_rows != len(df):
+                raise OSError(
+                    f"parquet validation row mismatch: "
+                    f"wrote {len(df)} but readback says {md.num_rows}"
+                )
+        except OSError as ve:
+            # Quarantine the bad file so we can post-mortem it; never
+            # publish a corrupt parquet to the dashboard tier.
+            qdir = dst.parent.parent / ".quarantine"
+            qdir.mkdir(parents=True, exist_ok=True)
+            from datetime import datetime as _dt
+            stamp = _dt.utcnow().strftime("%Y%m%dT%H%M%S")
+            qpath = qdir / f"{dst.stem}.{stamp}.bad.parquet"
+            try:
+                os.replace(tmp_path, qpath)
+                log.error(
+                    f"persist: parquet validation FAILED for {dst.name}: {ve}; "
+                    f"quarantined at {qpath}"
+                )
+            except OSError:
+                log.error(
+                    f"persist: parquet validation FAILED for {dst.name}: {ve}; "
+                    f"could not quarantine"
+                )
+            # Surface to degradation monitor if available
+            try:
+                from omni.llm.rag.degradation import monitor as _dm
+                _dm.record(
+                    component="persist",
+                    severity="error",
+                    event="corrupt_parquet_blocked",
+                    details={"dst": str(dst), "rows": len(df),
+                             "error": str(ve)[:200]},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            raise
+
         os.replace(tmp_path, dst)
     finally:
         if tmp_path.exists():

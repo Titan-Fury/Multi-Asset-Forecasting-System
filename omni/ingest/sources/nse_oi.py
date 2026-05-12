@@ -15,8 +15,19 @@ This returns the live option chain. We aggregate it down to per-ticker features:
   - oi_change_pct        change vs previous close (when available)
 
 Cached at TTL.news.
+
+Phase 24.16 hardening:
+  - Dedicated warmup that visits the option-chain landing page (the
+    earlier flows-warmup didn't set the right cookies for this endpoint).
+  - Retry once with a fresh session on 401/403/429 (NSE rotates rate
+    limits independently for /api/option-chain-equities).
+  - Sanity check: if every numeric field comes back zero AND the symbol
+    is FNO-listed, emit a degradation event so the silent-empty mode is
+    no longer invisible.
 """
 from __future__ import annotations
+
+import time
 
 import pandas as pd
 import requests
@@ -26,23 +37,94 @@ from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
 
 
+# Symbols known to have F&O. If any of these comes back empty we know
+# the endpoint is broken (vs the symbol just being non-FNO). Used to
+# raise a degradation event without false positives on cash-only stocks.
+_KNOWN_FNO_SAMPLE = frozenset((
+    "RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN", "ITC", "ICICIBANK",
+    "AXISBANK", "BHARTIARTL", "LT", "KOTAKBANK", "HCLTECH",
+))
+
+
+def _option_chain_warmup() -> requests.Session:
+    """Build a session with cookies primed specifically for the
+    option-chain-equities endpoint. NSE's anti-scraping is per-endpoint;
+    a session warmed for /market-data does NOT necessarily work here.
+    """
+    s = _nse_session()
+    s.headers.update(_HEADERS_API)
+    # Visit the human option-chain page first; this sets the cookies
+    # the JSON endpoint requires (`bm_sv`, `_abck`, etc).
+    try:
+        s.get("https://www.nseindia.com/option-chain", timeout=8)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"nse_oi option-chain warmup soft-fail: {e}")
+    return s
+
+
 @cached(ttl=TTL.news, key="nse_option_chain:{ticker}")
 def option_chain(ticker: str) -> dict:
     """Fetch the live option chain for an NSE FNO symbol. Returns raw JSON
     or {} on any failure.
+
+    Retries once with a fresh session on rate-limit / auth errors. Surfaces
+    persistent failures to the degradation monitor.
     """
-    s = _nse_session()
-    s.headers.update(_HEADERS_API)
-    try:
-        url = f"https://www.nseindia.com/api/option-chain-equities?symbol={ticker}"
-        r = s.get(url, timeout=8)
-        if r.status_code != 200:
-            log.debug(f"NSE option chain {ticker}: status={r.status_code}")
-            return {}
-        return r.json()
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"nse option chain fetch failed for {ticker}: {e}")
-        return {}
+    url = f"https://www.nseindia.com/api/option-chain-equities?symbol={ticker}"
+    last_status: int | None = None
+    last_err: str | None = None
+
+    for attempt in (1, 2):
+        s = _option_chain_warmup()
+        try:
+            r = s.get(url, timeout=10)
+            last_status = r.status_code
+            if r.status_code == 200:
+                try:
+                    j = r.json()
+                except ValueError as ve:
+                    last_err = f"non-JSON body: {ve}"
+                    log.debug(f"NSE option chain {ticker}: {last_err}")
+                    j = {}
+                if j:
+                    return j
+            elif r.status_code in (401, 403, 429):
+                # Rate-limit or cookie expired — warmup again on retry
+                last_err = f"status={r.status_code}"
+                log.debug(f"NSE option chain {ticker} attempt {attempt}: {last_err}")
+                time.sleep(0.5)
+                continue
+            else:
+                last_err = f"status={r.status_code}"
+                log.debug(f"NSE option chain {ticker}: {last_err}")
+                break
+        except requests.exceptions.RequestException as e:
+            last_err = f"{type(e).__name__}: {e}"
+            log.debug(f"NSE option chain {ticker} attempt {attempt}: {last_err}")
+            time.sleep(0.5)
+            continue
+        except Exception as e:  # noqa: BLE001
+            last_err = f"{type(e).__name__}: {e}"
+            log.warning(f"nse option chain unexpected error for {ticker}: {e}")
+            break
+
+    # Both attempts failed — surface to ops if this is a known-FNO name
+    if ticker.upper() in _KNOWN_FNO_SAMPLE:
+        try:
+            from omni.llm.rag.degradation import monitor
+            monitor.record(
+                component="nse_oi",
+                severity="warn",
+                event="empty_response_on_known_fno",
+                details={
+                    "ticker": ticker,
+                    "last_status": last_status,
+                    "last_error": (last_err or "")[:200],
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {}
 
 
 def oi_features(ticker: str) -> dict:
@@ -114,3 +196,4 @@ def oi_features(ticker: str) -> dict:
         out["max_pain_dist_pct"] = round((spot - best_strike) / spot * 100.0, 2) \
                                      if spot > 0 else 0.0
     return out
+
