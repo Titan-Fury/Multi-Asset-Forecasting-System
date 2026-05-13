@@ -79,3 +79,14 @@ scratch/
 plans/
 lightning_logs/
 
+# --- Local-only docs (personal notes, phase summaries, walkthroughs) ---
+docs/architecture_walkthrough.md
+docs/interview_prep_master_guide.md
+docs/phase18_summary.md
+docs/phase19_sbi_benchmark.md
+docs/phase19_summary.md
+docs/phase20_summary.md
+docs/project_tree.md
+docs/revolutionary_ideas.md
+docs/search_improvement_and_bug_audit.md
+
