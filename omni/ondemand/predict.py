@@ -20,14 +20,11 @@ import numpy as np
 import pandas as pd
 
 from omni.ensemble.pipeline import assemble_signals
-from omni.llm.backends.base import BackendError
-from omni.llm.router import route as _llm_route
 from omni.models.xgboost_5d import walkforward_fit
 from omni.ondemand import model_registry
 from omni.ondemand.cache import TTL, cached
 from omni.ondemand.features_inline import build_features_inline
 from omni.ondemand.lookup import LookupBundle, lookup_ticker
-from omni.ondemand.quality import Provenance
 from omni.utils.logger import log
 
 
@@ -60,6 +57,11 @@ class PredictionCard:
     model_kind: str = "universal_5d"
     deep_analysis_available: bool = True
     fold_aucs: list[float] | None = None  # only set by deep_analysis
+    # Phase 24.18 — lower-circuit risk score (India equities only).
+    # `circuit_risk_pct`  in [0, 1] — probability of hitting -9.5%+ over 5d.
+    # `circuit_risk_band` "low" / "elevated" / "high" or None when n/a.
+    circuit_risk_pct: float | None = None
+    circuit_risk_band: str | None = None
     # ---- new in UI v2 ----
     expected_move_pct: float = 0.0       # signed point estimate over 5 trading days
     expected_low_pct: float = 0.0        # ~ -1 sigma envelope
@@ -138,12 +140,15 @@ _MODEL_CACHE: dict[str, tuple[Any, ...]] = {}
 
 
 def _cached_models(mv_tag: str):
-    """Return (universal, stack_record, conformal) loaded once per mv_tag."""
+    """Return (universal, stack_record, conformal, circuit_risk) loaded once
+    per mv_tag. circuit_risk is the optional Phase 24.18 sparse-positive
+    classifier; None when the artifact is absent (training script not run)."""
     if mv_tag in _MODEL_CACHE:
         return _MODEL_CACHE[mv_tag]
     universal = None
     stack_rec = None
     conformal = None
+    circuit_model = None
     try:
         universal = model_registry.load()
     except Exception as e:  # noqa: BLE001
@@ -166,8 +171,22 @@ def _cached_models(mv_tag: str):
             conformal = _jl.load(cp)
     except Exception as e:  # noqa: BLE001
         log.debug(f"conformal load skipped: {e}")
+    # Phase 24.18 — circuit-risk model (India only). Loaded the same way
+    # the other heads are: pickled, file-mtime keyed via mv_tag so a retrain
+    # invalidates the cache automatically.
+    try:
+        from omni.models import circuit_risk as _crisk
+        circuit_model = _crisk.load()
+        if circuit_model is not None:
+            log.info(
+                f"circuit-risk model loaded: pr_auc={circuit_model.pr_auc:.4f} "
+                f"base_rate={circuit_model.base_rate:.4f} "
+                f"feats={len(circuit_model.feature_cols)}"
+            )
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"circuit-risk load skipped: {e}")
     _MODEL_CACHE.clear()
-    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal)
+    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model)
     return _MODEL_CACHE[mv_tag]
 
 
@@ -579,7 +598,6 @@ def _model_version_tag() -> str:
     retrain (audit-doc B3).
     """
     try:
-        from pathlib import Path
         blob, _ = model_registry._paths_for(5)
         if blob.exists():
             return f"v{int(blob.stat().st_mtime)}"
@@ -628,7 +646,7 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                        if c not in _DROP_ALWAYS and not is_target_col(c)]]
     feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
 
-    universal, stack_rec, _conformal = _cached_models(_model_version_tag())
+    universal, stack_rec, _conformal, circuit_model = _cached_models(_model_version_tag())
     proba, kind = _score_one(feat_only, universal=universal,
                               stack_rec=stack_rec, asset_class=asset_class)
 
@@ -648,8 +666,27 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"horizon model h={h} predict failed: {exc}")
 
+    # Phase 24.18 — circuit-risk score (India equities only). Computed AFTER
+    # the main proba so a circuit-model failure can never break the card.
+    circuit_pct: float | None = None
+    circuit_band_str: str | None = None
+    if asset_class == "india" and circuit_model is not None:
+        try:
+            from omni.models import circuit_risk as _crisk
+            p_circ = float(circuit_model.predict_proba(feat_only)[0, 1])
+            circuit_pct = p_circ
+            circuit_band_str = _crisk.band(p_circ)
+            log.debug(
+                f"circuit_risk[{ticker}]: p={p_circ:.4f} band={circuit_band_str}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"circuit_risk score failed [{ticker}]: {exc}")
+
     card = _build_card(bundle, feats, proba, model_kind=kind,
                         per_horizon_proba=per_horizon)
+    if card is not None:
+        card.circuit_risk_pct = circuit_pct
+        card.circuit_risk_band = circuit_band_str
 
     # ---- Pair / cross-asset signal (Part B) ----
     try:
@@ -712,7 +749,10 @@ def deep_analysis(ticker: str, asset_class: str,
     shrink_w = 1.0
     try:
         um = model_registry.load()
-        feat_only = full.tail(1)
+        # .copy() because tail(1) returns a view; without it the np.nan
+        # assignment below trips pandas' SettingWithCopyWarning (and will
+        # become a hard error in pandas 3.x).
+        feat_only = full.tail(1).copy()
         for c in [c for c in feat_only.columns
                     if c.startswith(("fwd_ret_", "fwd_dir_", "fwd_q_"))]:
             feat_only[c] = np.nan

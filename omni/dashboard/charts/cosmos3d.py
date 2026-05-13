@@ -15,7 +15,7 @@ import json
 import uuid
 from typing import Iterable
 
-import streamlit.components.v1 as components
+from omni.dashboard.charts import render_html
 
 
 def _normalise_card(c: dict) -> dict:
@@ -189,4 +189,4 @@ new ResizeObserver(() => {{
 }}).observe(root);
 </script>
 """
-    components.html(html, height=height + 20, scrolling=False)
+    render_html(html, height=height)

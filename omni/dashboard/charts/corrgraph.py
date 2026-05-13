@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
-import streamlit.components.v1 as components
+
+from omni.dashboard.charts import render_html
 
 
 def _build_edges(price_panel: pd.DataFrame, threshold: float = 0.4, max_edges: int = 250) -> tuple[list, list]:
@@ -99,4 +99,4 @@ def render_corrgraph(price_panel: pd.DataFrame, *, height: int = 460, threshold:
 }})();
 </script>
 """
-    components.html(html, height=height + 20, scrolling=False)
+    render_html(html, height=height)

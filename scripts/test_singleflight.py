@@ -13,7 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from omni.ondemand.cache import cached, invalidate, get_cache
+from omni.ondemand.cache import cached, invalidate
 
 
 def main() -> int:

@@ -48,18 +48,32 @@ backends:
     model: minimax/minimax-m2.5:free
     timeout_s: 90
     rate_limit:
-      rpm: 12      # free tier — keep headroom
+      rpm: 18      # OpenRouter free tier caps at 20 rpm; 18 leaves headroom
       rpd: 200
     enabled: true
 
-  openrouter_minimax_paid:
+  # Phase 24.18 — Nemotron chat fallback. MiniMax M2.5 free is intermittently
+  # rate-limited / down upstream; Nemotron-3-Super-120B (MoE, 12B active) is
+  # the strongest free chat model on OpenRouter and works as a drop-in.
+  openrouter_nemotron_chat:
     type: openrouter
     api_key_env: OPENROUTER_API_KEY
-    model: minimax/minimax-m2.5
+    model: nvidia/nemotron-3-super-120b-a12b:free
     timeout_s: 90
     rate_limit:
-      rpm: 60
-      rpd: 5000
+      rpm: 18
+      rpd: 200
+    enabled: true
+
+  # Phase 24.18 — smaller Nemotron variant, faster on short prompts
+  openrouter_nemotron_nano:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: nvidia/nemotron-nano-9b-v2:free
+    timeout_s: 60
+    rate_limit:
+      rpm: 18
+      rpd: 200
     enabled: true
 
   groq_llama70b:
@@ -154,14 +168,17 @@ tasks:
     cache_ttl_days: 30
 
   daily_market_synthesis:
-    primary: [cortex_claude]
-    fallback: [groq_llama70b, gemini_flash, cortex_llama405, openrouter_llama70b]
+    # cortex_claude demoted to fallback because snowflake-connector-python
+    # isn't always installed; the router was logging 2 warnings per call.
+    # Promote groq_llama70b which is fast + Llama 3.1 70B class.
+    primary: [groq_llama70b]
+    fallback: [openrouter_nemotron_chat, gemini_flash, cortex_claude, cortex_llama405, openrouter_llama70b]
     cache_ttl_days: 1
     cost_class: paid
 
   signal_explanation:
     primary: [openrouter_minimax_free]
-    fallback: [groq_llama70b, openrouter_minimax_paid, gemini_flash, ollama_qwen, openrouter_gemma, cortex_claude]
+    fallback: [groq_llama70b, openrouter_nemotron_chat, gemini_flash, ollama_qwen, openrouter_gemma, openrouter_nemotron_nano, cortex_claude]
     cache_ttl_days: 1
 
   # Phase 24.15 — RAG-grounded signal explanation. Same backend chain but
@@ -174,10 +191,14 @@ tasks:
   #   rag.retrieval.top_k           number of chunks fed to the LLM
   #   rag.validators.grounding_min  sentence-cosine threshold for is_safe
   signal_explanation_rag:
-    primary: [cortex_claude]
-    fallback: [groq_llama70b, gemini_flash, openrouter_minimax_free, ollama_qwen]
+    # MiniMax M2.5 (free) is currently the strongest free OpenRouter model
+    # by benchmarks (SWE-Bench 80.2%, BrowseComp 76.3%, 197K context) and
+    # has reasoning support — well-suited to citation-heavy RAG outputs.
+    # groq_llama70b kept as fast fallback (~1-3s vs M2.5 ~3-5s).
+    primary: [openrouter_minimax_free]
+    fallback: [groq_llama70b, openrouter_nemotron_chat, gemini_flash, openrouter_llama70b, ollama_qwen, cortex_claude]
     cache_ttl_days: 1
-    cost_class: paid
+    cost_class: free
     rag:
       embedder: nemotron
       reranker: bge-reranker-base

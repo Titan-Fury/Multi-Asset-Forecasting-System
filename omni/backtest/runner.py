@@ -24,14 +24,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 
 from omni.backtest import checks as _checks
 from omni.backtest import metrics as _metrics
 from omni.ensemble.combine import BlendConfig, blend
 from omni.ensemble.gate import GateConfig, apply as gate_apply
-from omni.models.xgboost_5d import walkforward_fit, prepare_xy
+from omni.models.xgboost_5d import walkforward_fit
 from omni.rubric.scorer import score_frame as rubric_score_frame
 from omni.utils.logger import log
 

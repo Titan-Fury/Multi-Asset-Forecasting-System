@@ -50,11 +50,14 @@ macro:
 
 social:
   reddit:
-    enabled: false   # enable in v2 after creating PRAW app
+    enabled: true    # Phase 24.18 — public-JSON scraper, no auth needed.
+                     # Module gracefully degrades to empty list on 429/5xx.
     subreddits:
       - wallstreetbets
       - stocks
       - IndianStockMarket
+      - IndiaInvestments
+      - DalalStreetTalks
       - CryptoCurrency
       - Forex
   twitter:

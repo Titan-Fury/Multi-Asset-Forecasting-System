@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
-import numpy as np
 import pandas as pd
 
 from omni.ondemand.predict import predict_ticker

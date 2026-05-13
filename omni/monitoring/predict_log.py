@@ -17,11 +17,9 @@ Design choices:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable
 
 import pandas as pd
 
-from omni.lake import io as _lake_io
 from omni.lake import paths as _lake_paths
 from omni.utils.logger import log
 

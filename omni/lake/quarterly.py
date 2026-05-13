@@ -47,6 +47,12 @@ def _yf_symbol(asset_class: str, ticker: str) -> str:
     # bugs like CIANAGRO.BO -> CIANAGRO.BO.NS.
     if ticker.startswith("^") or "=" in ticker or "-" in ticker or "." in ticker:
         return ticker
+    # Known BSE-only India names → .BO directly; same shared registry used
+    # by omni.ingest.prices so quarterly fundamentals don't 404 on .NS.
+    if asset_class == "india":
+        from omni.ingest.prices import is_bse_only
+        if is_bse_only(ticker):
+            return f"{ticker}.BO"
     suffix = {"india": ".NS", "us": "", "crypto": "-USD", "fx": "=X"}.get(asset_class, "")
     return f"{ticker}{suffix}"
 

@@ -14,8 +14,11 @@ import pandas as pd
 
 
 _INTERACT_COLS = (
-    "rsi_14", "macd_hist", "vol_ratio", "ret_20d",
+    "rsi_14", "macd_hist_pct", "vol_ratio", "ret_20d",
     "mom_vol_adj_20d", "sent_mean", "sent_z_30d",
+    # Phase 24.18 — let trees learn that panic-keyword + bear regime is a
+    # stronger sell signal than panic-keyword + chop, etc.
+    "panic_keyword_ratio", "news_volume_z_60d",
 )
 
 

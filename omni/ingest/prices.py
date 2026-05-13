@@ -13,7 +13,6 @@ Dedup key: (ticker, date).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -25,10 +24,32 @@ from omni.utils.logger import log
 _OHLCV_COLS = ["date", "open", "high", "low", "close", "adj_close", "volume"]
 
 
+# India equities that trade ONLY on BSE (not NSE). yfinance's ".NS" fetch
+# returns 404 + writes to stderr for these symbols on every attempt — and
+# tenacity retries amplify the noise — so we route them straight to ".BO".
+# Maintained manually; add a name when you see repeated 404s for it in the
+# logs. Keeping it a small explicit set is preferable to a runtime probe
+# (which would itself emit a 404 to learn that fact).
+_BSE_ONLY_INDIA: frozenset[str] = frozenset({
+    "CIANAGRO",
+    "OMAXAUTO",
+    "HINDMOTORS",
+})
+
+
+def is_bse_only(ticker: str) -> bool:
+    """True if `ticker` is an India equity that trades only on BSE.
+    Bare ticker only (no suffix) — caller normalises before checking."""
+    return ticker.upper() in _BSE_ONLY_INDIA
+
+
 def _yf_symbol(asset_class: str, ticker: str) -> str:
     # Indexes (e.g. ^NSEI, ^GSPC) and already-suffixed tickers pass through.
     if ticker.startswith("^") or "=" in ticker or "-" in ticker or "." in ticker:
         return ticker
+    # Known BSE-only India names → .BO directly, skipping the .NS 404 hop.
+    if asset_class == "india" and is_bse_only(ticker):
+        return f"{ticker}.BO"
     suffix_map = {"india": ".NS", "us": "", "crypto": "-USD", "fx": "=X"}
     return f"{ticker}{suffix_map[asset_class]}"
 
@@ -116,11 +137,16 @@ def latest_intraday(asset_class: str, ticker: str) -> dict:
     Used by the dashboard to surface a 'live' price even when the day's
     daily bar hasn't finalized yet. Never raises — returns an empty dict
     on any failure.
+
+    NSE -> BSE fallback for India small/mid-caps (e.g. CIANAGRO, OMAXAUTO
+    are BSE-only on Yahoo); mirrors the fallback already in fetch_prices().
     """
     try:
         import yfinance as yf
         sym = _yf_symbol(asset_class, ticker)
         df = yf.Ticker(sym).history(period="1d", interval="5m")
+        if (df is None or df.empty) and asset_class == "india" and "." not in ticker:
+            df = yf.Ticker(f"{ticker}.BO").history(period="1d", interval="5m")
         if df is None or df.empty:
             return {}
         last = df.dropna(subset=["Close"]).tail(1)

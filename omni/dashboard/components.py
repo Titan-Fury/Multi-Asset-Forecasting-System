@@ -757,6 +757,44 @@ def prediction_card(card_dict: dict) -> None:
             unsafe_allow_html=True,
         )
 
+    # ---- Phase 24.18 — circuit-risk badge (India equities only) ----
+    # Surfaced only when the model is loaded AND the band is elevated/high.
+    # Below 0.10 we stay silent so the card doesn't get noisy for normal
+    # names. Renders BEFORE rubric pillars so it's prominently visible.
+    crisk_pct = card_dict.get("circuit_risk_pct")
+    crisk_band = card_dict.get("circuit_risk_band")
+    if (
+        ac == "india"
+        and crisk_pct is not None
+        and crisk_band in ("elevated", "high")
+    ):
+        st.markdown("<hr class='hairline'/>", unsafe_allow_html=True)
+        if crisk_band == "high":
+            bg, border, icon, headline = (
+                "rgba(239, 68, 68, 0.16)", "rgba(239, 68, 68, 0.55)",
+                "⚠", "Lower-circuit risk: HIGH",
+            )
+        else:  # elevated
+            bg, border, icon, headline = (
+                "rgba(234, 179, 8, 0.16)", "rgba(234, 179, 8, 0.50)",
+                "⚡", "Lower-circuit risk: elevated",
+            )
+        st.markdown(
+            f"<div style='background:{bg};border:1px solid {border};"
+            f"border-radius:10px;padding:10px 14px;display:flex;"
+            f"justify-content:space-between;align-items:center;'>"
+            f"<div style='font-weight:600;font-size:var(--text-sm);'>"
+            f"{icon} {headline}</div>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:var(--text-sm);"
+            f"opacity:0.9;'>p ≈ {float(crisk_pct):.1%}</div>"
+            f"</div>"
+            f"<div style='font-size:var(--text-xs);color:var(--text-muted);"
+            f"margin-top:6px;'>Probability of a ≥9.5% drawdown over the next "
+            f"5 trading days. Sparse-positive XGBoost on price + microstructure "
+            f"+ news-narrative features (PR-AUC measured OOF).</div>",
+            unsafe_allow_html=True,
+        )
+
     # ---- section 6: pillars ----
     pillars = card_dict.get("pillars", {}) or {}
     if pillars:

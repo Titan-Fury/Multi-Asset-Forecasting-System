@@ -16,12 +16,11 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Iterable
 
 import pandas as pd
 import requests
 
-from omni.ondemand.cache import cached, get_cache
+from omni.ondemand.cache import cached
 from omni.utils.logger import log
 
 

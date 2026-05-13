@@ -17,7 +17,7 @@ we handle that quietly. Cached at TTL.fundamentals (24h) per date.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from io import StringIO
 from typing import Iterable
 

@@ -17,11 +17,9 @@ Output schema (one row per business day):
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from omni.storage import drive as _drive
-from omni.storage import local as _local
 from omni.utils.logger import log
 
 

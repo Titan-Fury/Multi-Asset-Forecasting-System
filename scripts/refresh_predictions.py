@@ -19,7 +19,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path

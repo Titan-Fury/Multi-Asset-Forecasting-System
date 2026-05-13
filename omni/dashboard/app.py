@@ -1279,6 +1279,114 @@ def _render_dev_tab() -> None:
 
     st.divider()
 
+    # --------- Phase 24.18 — Windows Task Scheduler integration ---------
+    st.markdown("### ⏰ Scheduled tasks (Windows Task Scheduler)")
+    st.caption(
+        "Manage the daily orchestrator schedule directly from the UI. "
+        "Install creates a daily 18:30 IST trigger for "
+        "`scripts/run_daily.bat`. Install/Uninstall require admin "
+        "(re-launch Streamlit as administrator); Run-now and Refresh "
+        "work for any user."
+    )
+
+    try:
+        from omni.ops import scheduler as _sched
+        _sched_admin = _sched.is_admin()
+        _sched_status = _sched.status()
+        _sched_installed = bool(_sched_status.get("installed"))
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"scheduler module unavailable: {exc}")
+        _sched_admin = False
+        _sched_status = {"installed": False}
+        _sched_installed = False
+
+    inst_chip = (
+        "<span style='color:#4ade80;background:rgba(74,222,128,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>INSTALLED</span>"
+        if _sched_installed else
+        "<span style='color:#f87171;background:rgba(248,113,113,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>NOT INSTALLED</span>"
+    )
+    admin_chip = (
+        "<span style='color:#4ade80;background:rgba(74,222,128,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>ADMIN</span>"
+        if _sched_admin else
+        "<span style='color:#fbbf24;background:rgba(251,191,36,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>USER</span>"
+    )
+    last_run = _sched_status.get("last_run") or "—"
+    last_result = _sched_status.get("last_result") or "—"
+    next_run = _sched_status.get("next_run") or "—"
+    state = _sched_status.get("state") or "—"
+    st.markdown(
+        f"<div style='font-size:13px;color:#cbd5e1;margin-bottom:8px;'>"
+        f"task: <code style='color:#94a3b8;'>Omni_Stocks_Daily</code> &nbsp;{inst_chip}"
+        f" &nbsp;process: {admin_chip}<br>"
+        f"<span style='color:#94a3b8;font-size:11px;'>"
+        f"state={_esc(state)} &nbsp; last_run={_esc(last_run)} &nbsp; "
+        f"last_result={_esc(last_result)} &nbsp; next_run={_esc(next_run)}"
+        f"</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    if not _sched_admin:
+        st.caption(
+            "💡 To install/uninstall: close Streamlit, right-click → "
+            "**Run as administrator**, then come back here."
+        )
+
+    s_cols = st.columns(4)
+    with s_cols[0]:
+        if st.button(
+            "📥 Install daily task", use_container_width=True,
+            disabled=(_sched_installed or not _sched_admin),
+            help="Create scheduled task that runs scripts/run_daily.bat "
+                 "every day at 18:30 local time. Requires admin.",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.install()
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"install failed: {exc}")
+    with s_cols[1]:
+        if st.button(
+            "▶ Run task now", use_container_width=True,
+            disabled=not _sched_installed,
+            help="Trigger the scheduled task immediately. Runs in the "
+                 "background — check `logs/daily_*.log` for output.",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.run_now()
+                (st.success if ok else st.error)(msg)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"run_now failed: {exc}")
+    with s_cols[2]:
+        if st.button(
+            "📊 Refresh status", use_container_width=True,
+            help="Re-query schtasks for current task state.",
+        ):
+            st.rerun()
+    with s_cols[3]:
+        if st.button(
+            "🗑 Uninstall task", use_container_width=True,
+            disabled=(not _sched_installed or not _sched_admin),
+            help="Remove the scheduled task. Requires admin.",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.uninstall()
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"uninstall failed: {exc}")
+
+    st.divider()
+
     # --------- Phase 24.15 — RAG store maintenance ---------
     st.markdown("### RAG store (news embeddings for grounded why-text)")
     st.caption(
@@ -1312,7 +1420,6 @@ def _render_dev_tab() -> None:
             with st.spinner("re-indexing news…"):
                 try:
                     from omni.llm.rag.pipeline import get_pipeline
-                    from omni.llm.rag.chunker import chunk_news_dataframe
                     pipe = get_pipeline()
                     n_files = 0
                     n_articles = 0
@@ -1791,6 +1898,84 @@ def _render_predict_tab() -> None:
         st.caption(f"chart unavailable: {_e}")
 
 
+@st.cache_data(ttl=60)
+def _lake_freshness() -> dict:
+    """Return dict with `last_backfill_iso`, `age_days`, `n_tickers` from the
+    lake manifest. Cached 60s so we don't re-read JSON on every rerun.
+    Falls back gracefully when the manifest is absent (first-run)."""
+    import json
+    from datetime import datetime, timezone
+    try:
+        from omni.lake import paths as _lake_paths
+        mf = _lake_paths.lake_root() / "manifest.json"
+        if not mf.exists():
+            return {"last_backfill_iso": None, "age_days": None, "n_tickers": None}
+        with mf.open() as f:
+            data = json.load(f)
+        bf = data.get("last_backfill") or {}
+        iso = bf.get("completed_at")
+        if not iso:
+            return {"last_backfill_iso": None, "age_days": None, "n_tickers": None}
+        ts = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - ts).total_seconds() / 86400
+        return {
+            "last_backfill_iso": iso,
+            "age_days": age,
+            "n_tickers": bf.get("n_tickers"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("lake freshness probe failed: %s", exc)
+        return {"last_backfill_iso": None, "age_days": None, "n_tickers": None}
+
+
+def _render_freshness_banner() -> None:
+    """Top-of-app data-freshness chip. Phase 24.18.
+
+    Reads lake manifest + computes (now - last_backfill).days and renders a
+    colour-coded chip:
+      green  if age < 2d        (lake is fresh)
+      amber  if 2 <= age < 5d   (data getting stale)
+      red    if age >= 5d       (run scripts/backfill_universe.py)
+    """
+    info = _lake_freshness()
+    age = info.get("age_days")
+    if age is None:
+        st.warning(
+            "Lake manifest not found — run `python scripts/backfill_universe.py` "
+            "to populate price/fundamentals/news data."
+        )
+        return
+    iso = info.get("last_backfill_iso", "?")
+    ts_short = iso[:16].replace("T", " ") if iso else "?"
+    n_t = info.get("n_tickers") or 0
+    if age < 2:
+        bg = "rgba(34, 197, 94, 0.15)"   # green
+        border = "rgba(34, 197, 94, 0.45)"
+        icon = "🟢"
+        label = "fresh"
+    elif age < 5:
+        bg = "rgba(234, 179, 8, 0.18)"   # amber
+        border = "rgba(234, 179, 8, 0.50)"
+        icon = "🟡"
+        label = "stale"
+    else:
+        bg = "rgba(239, 68, 68, 0.18)"   # red
+        border = "rgba(239, 68, 68, 0.55)"
+        icon = "🔴"
+        label = "run backfill"
+    st.markdown(
+        f"<div style='display:flex;justify-content:flex-end;align-items:center;"
+        f"gap:8px;padding:6px 12px;margin:-4px 0 6px 0;'>"
+        f"<span style='font-size:0.78rem;color:var(--text-muted);"
+        f"letter-spacing:0.04em;'>lake snapshot</span>"
+        f"<span style='font-size:0.78rem;background:{bg};border:1px solid {border};"
+        f"border-radius:999px;padding:3px 12px;font-family:ui-monospace,monospace;'>"
+        f"{icon} {ts_short} UTC · {age:.1f}d ago · {n_t} tickers · {label}"
+        f"</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Omni_Stocks · Multi-asset signals",
@@ -1808,6 +1993,10 @@ def main() -> None:
         render_marquee(height_px=36)
     except Exception:  # noqa: BLE001
         _log.warning("marquee render failed", exc_info=True)
+
+    # Phase 24.18 — lake-freshness chip, right-aligned, under the marquee.
+    # Tells the user at a glance whether the daily backfill ran today.
+    _render_freshness_banner()
 
     # ---- sidebar
     with st.sidebar:

@@ -12,7 +12,6 @@ models too but quality drops.
 """
 from __future__ import annotations
 
-from typing import Iterable
 
 from omni.llm.rag.retriever import RetrievedChunk
 

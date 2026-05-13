@@ -14,10 +14,16 @@ import pandas as pd
 
 
 _RANK_COLS = (
-    "ret_20d", "ret_60d",                 # momentum
-    "rsi_14", "macd_hist", "vol_ratio",   # technical
-    "trailing_pe", "profit_margin",       # fundamental
+    "ret_20d", "ret_60d",                     # momentum
+    "rsi_14", "macd_hist_pct", "vol_ratio",   # technical (Phase 24.17: macd_hist_pct)
+    "trailing_pe", "profit_margin",           # fundamental
     "return_on_equity", "revenue_growth",
+    # Phase 24.18 — narrative panic / news-volume features. Cross-sectional
+    # ranks of these are MORE useful than absolute values: a 0.95 rank of
+    # panic_keyword_ratio means "this stock has the noisiest news today
+    # within its asset class" which is a much cleaner regime signal than
+    # the raw ratio.
+    "news_volume_z_60d", "panic_keyword_ratio",
 )
 
 

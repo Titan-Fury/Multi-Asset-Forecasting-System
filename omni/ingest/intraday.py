@@ -59,16 +59,41 @@ def fetch_intraday_bars(
         if asset_class == "crypto":
             return _fetch_ccxt_intraday(ticker, interval=interval, days=days)
         return _fetch_yf_intraday(asset_class, ticker, interval=interval, days=days)
+    except KeyError as e:
+        # yfinance raises bare KeyError(symbol) when a ticker has no intraday
+        # data — common for BSE-only stocks, indices like ^NSEI, weekends.
+        # Expected, not actionable; downgrade to DEBUG to keep logs clean.
+        log.debug(f"intraday no data {asset_class}/{ticker}: {e}")
+        return _empty()
     except Exception as e:
         log.warning(f"intraday fetch failed {asset_class}/{ticker}: {e}")
         return _empty()
 
 
-def _fetch_yf_intraday(asset_class: str, ticker: str, *, interval: str, days: int) -> pd.DataFrame:
+def _yf_history_with_bo_fallback(asset_class: str, ticker: str,
+                                  *, period: str, interval: str):
+    """yfinance Ticker.history() with the same NSE -> BSE fallback used by
+    `omni.ingest.prices.fetch_prices`. India small/mid-caps like CIANAGRO
+    and OMAXAUTO trade only on BSE; if the .NS suffix returns empty (Yahoo
+    emits a 404 + 'possibly delisted' for them), retry once with .BO.
+    Returns (df, sym_used) so the caller can log which symbol actually
+    produced data. Empty df + original sym on hard failure."""
     import yfinance as yf
     sym = _yf_symbol(asset_class, ticker)
-    period = f"{max(1, min(days, 60))}d"  # yf 5m max 60d
     df = yf.Ticker(sym).history(period=period, interval=interval, auto_adjust=False)
+    if (df is None or df.empty) and asset_class == "india" and "." not in ticker:
+        sym_bo = f"{ticker}.BO"
+        df_bo = yf.Ticker(sym_bo).history(period=period, interval=interval, auto_adjust=False)
+        if df_bo is not None and not df_bo.empty:
+            return df_bo, sym_bo
+    return df, sym
+
+
+def _fetch_yf_intraday(asset_class: str, ticker: str, *, interval: str, days: int) -> pd.DataFrame:
+    period = f"{max(1, min(days, 60))}d"  # yf 5m max 60d
+    df, _sym = _yf_history_with_bo_fallback(
+        asset_class, ticker, period=period, interval=interval,
+    )
     if df is None or df.empty:
         return _empty()
     df = df.reset_index().rename(columns={

@@ -9,15 +9,14 @@ consume directly. Never writes to the storage tier.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from omni.ingest.fundamentals import fetch_fundamentals as _yf_fundamentals
-from omni.ingest.prices import _yf_symbol, fetch_prices as _yf_prices
+from omni.ingest.prices import fetch_prices as _yf_prices
 from omni.ingest.sources import (
     edgar as _edgar,
     fmp as _fmp,

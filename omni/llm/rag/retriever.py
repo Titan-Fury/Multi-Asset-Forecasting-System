@@ -14,7 +14,6 @@ The reranker (BAAI/bge-reranker-base) loads on CUDA when available
 from __future__ import annotations
 
 import logging
-import math
 import re
 import threading
 from dataclasses import dataclass, field

@@ -22,12 +22,17 @@ from omni.utils.logger import log
 
 
 def _yf_symbol(asset_class: str, ticker: str) -> str | None:
-    """Replicate the convention used by omni.features.earnings."""
+    """Replicate the convention used by omni.features.earnings.
+
+    Routes known BSE-only India tickers (CIANAGRO etc.) straight to ``.BO``
+    via the shared `is_bse_only` registry in ``omni.ingest.prices``; without
+    this they'd hit ``.NS`` and 404 on every earnings-calendar fetch."""
     if asset_class in ("crypto", "fx"):
         return None
     sym = str(ticker).upper()
     if asset_class == "india" and not sym.endswith((".NS", ".BO")):
-        sym = sym + ".NS"
+        from omni.ingest.prices import is_bse_only
+        sym = sym + (".BO" if is_bse_only(sym) else ".NS")
     return sym
 
 

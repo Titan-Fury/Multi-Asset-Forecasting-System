@@ -9,7 +9,6 @@ Public API:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -25,7 +24,8 @@ def _next_earnings_date(ticker: str, asset_class: str) -> pd.Timestamp | None:
         import yfinance as yf
         # Idempotent suffix: skip if ticker already has any Yahoo suffix.
         if asset_class == "india" and "." not in ticker and not ticker.startswith("^"):
-            sym = f"{ticker}.NS"
+            from omni.ingest.prices import is_bse_only
+            sym = f"{ticker}.BO" if is_bse_only(ticker) else f"{ticker}.NS"
         else:
             sym = ticker
         cal = yf.Ticker(sym).calendar

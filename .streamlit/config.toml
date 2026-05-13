@@ -16,6 +16,19 @@ gatherUsageStats = false
 [server]
 headless = true
 runOnSave = true
+# Exclude site-packages from the file watcher. Without this, Streamlit's
+# local-sources watcher walks every transformers submodule on every
+# rerun, which fails-loud on the image/OCR models that need torchvision
+# (zoedepth, pp_doclayout_v2/v3, pp_formulanet, pp_lcnet, pp_ocrv5_*).
+# We never edit third-party code, so blacklisting them costs nothing.
+folderWatchBlacklist = [
+    ".venv",
+    "venv",
+    "site-packages",
+    "data",
+    "logs",
+    "lightning_logs",
+]
 
 [client]
 showErrorDetails = true

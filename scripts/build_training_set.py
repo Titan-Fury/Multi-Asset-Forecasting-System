@@ -109,6 +109,27 @@ def main() -> int:
             log.warning(f"news load failed: {exc}; emb_* will be zeros")
             news_all = pd.DataFrame()
 
+    # Phase 24.18 — also build the AGGREGATED sentiment frame here so the
+    # per-ticker training frames get sent_mean/n_articles/panic_kw_count/etc.
+    # populated. Without this step `build_features_inline` sees an empty
+    # sentiment frame and the merge is skipped, leaving every sentiment
+    # column NaN/0 in training (Sentiment Health Score 0/10).
+    sent_agg_all = pd.DataFrame()
+    if not news_all.empty:
+        try:
+            from omni.features.sentiment import score_articles, aggregate
+            log.info(f"scoring {len(news_all):,} articles via FinBERT...")
+            scored = score_articles(news_all)
+            sent_agg_all = aggregate(scored, ticker_col="ticker_hint")
+            log.info(
+                f"sentiment aggregated: {len(sent_agg_all):,} (ticker, date) rows; "
+                f"{(sent_agg_all['n_articles'] > 0).sum() if 'n_articles' in sent_agg_all.columns else 0} "
+                f"with non-zero coverage"
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"sentiment scoring failed: {exc}; columns will be zero")
+            sent_agg_all = pd.DataFrame()
+
     parts: list[pd.DataFrame] = []
     t0 = time.time()
     for i, (ticker, ac) in enumerate(pairs, 1):
@@ -130,6 +151,14 @@ def main() -> int:
                 # No ticker hint column — pass full news; embed_daily_news
                 # will day-filter and dedupe via cache.
                 ticker_news = news_all
+            # Phase 24.18 — start with the AGGREGATED sentiment frame so the
+            # downstream merge in features_inline actually populates
+            # sent_mean / n_articles / panic_kw_count / promoter_kw_count
+            # / sebi_kw_count for this ticker.
+            if not sent_agg_all.empty and "ticker" in sent_agg_all.columns:
+                ticker_sent = sent_agg_all[
+                    sent_agg_all["ticker"].astype(str).str.upper().str.contains(sym, na=False)
+                ].copy()
             if not ticker_news.empty:
                 ticker_sent.attrs["news_raw"] = ticker_news
 

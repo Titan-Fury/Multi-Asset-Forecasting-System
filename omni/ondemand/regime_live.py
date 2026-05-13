@@ -9,7 +9,6 @@ large); we re-fit on cache miss. Fit is fast (~3-6s for 10y daily).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd

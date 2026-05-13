@@ -78,9 +78,15 @@ def build_features_inline(
                           + pd.tseries.offsets.BDay(1))
             drop_cols = [c for c in ("ticker",) if c in s.columns]
             out = out.merge(s.drop(columns=drop_cols), on="date", how="left")
+            # Phase 24.18 — added panic_kw_count, promoter_kw_count,
+            # sebi_kw_count to the forward-fill list so the rolling-7d
+            # narrative features in sentiment_z see consistent inputs even
+            # on weekends/holidays where sentiment.aggregate produces no row.
             sent_cols = [c for c in ("n_articles", "sent_mean", "sent_std",
                                        "sent_pos_share", "sent_neg_share",
-                                       "sent_momentum_7d") if c in out.columns]
+                                       "sent_momentum_7d",
+                                       "panic_kw_count", "promoter_kw_count",
+                                       "sebi_kw_count") if c in out.columns]
             if sent_cols:
                 out = out.sort_values("date")
                 out[sent_cols] = out[sent_cols].ffill()
@@ -122,7 +128,6 @@ def build_features_inline(
         from omni.features.cross_sectional import add_cross_sectional_ranks
         # Probe the column set this transform produces by running on a
         # cheap two-row dummy frame, then zero-fill those columns on `out`.
-        import numpy as _np
         if "asset_class" not in out.columns:
             out["asset_class"] = asset_class
         probe_cols = list(out.columns)

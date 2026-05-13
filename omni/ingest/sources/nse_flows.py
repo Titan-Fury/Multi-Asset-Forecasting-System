@@ -17,8 +17,6 @@ DataFrame on any error. Format aligned to the lake schema for joining.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from io import StringIO
 
 import pandas as pd
 import requests

@@ -11,7 +11,6 @@ Returns a dict; never raises (returns {} on any failure).
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from omni.features.pair import benchmark_for, compute_pair_features

@@ -18,8 +18,15 @@ class FinBERTBackend(Backend):
     def _load(self) -> None:
         if FinBERTBackend._pipe is not None:
             return
+        # Phase 24.18 — silence transformers auto-discovery noise (torchvision
+        # missing for `prompt_depth_anything` etc.) before we touch the lib.
+        import os
+        os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+        os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
         try:
             import torch
+            import transformers.utils.logging as _hf_log
+            _hf_log.set_verbosity_error()
             from transformers import pipeline
         except ImportError as e:
             raise BackendError(f"transformers/torch not installed: {e}") from e

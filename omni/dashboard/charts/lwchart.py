@@ -9,7 +9,8 @@ import json
 import uuid
 
 import pandas as pd
-import streamlit.components.v1 as components
+
+from omni.dashboard.charts import render_html
 
 
 _LWC_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
@@ -103,4 +104,4 @@ def render_lwchart(df: pd.DataFrame, *, height: int = 380, title: str = "") -> N
 }})();
 </script>
 """
-    components.html(html, height=height + 20, scrolling=False)
+    render_html(html, height=height)

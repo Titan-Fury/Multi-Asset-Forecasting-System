@@ -9,7 +9,6 @@ fall back to a "—" tile rather than crashing the dashboard.
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Iterable
 

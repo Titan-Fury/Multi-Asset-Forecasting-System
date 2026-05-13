@@ -46,6 +46,22 @@ def _fetch_one(asset_class: str, ticker: str) -> dict:
     import yfinance as yf
     sym = _yf_symbol(asset_class, ticker)
     info = yf.Ticker(sym).info or {}
+    # Same NSE -> BSE fallback used by fetch_prices(). yfinance's .info dict
+    # is non-empty even for delisted tickers (it carries a few fields like
+    # 'symbol' and 'currency'), so we test on the actual fundamentals fields
+    # we care about, not on bool(info).
+    if asset_class == "india" and "." not in ticker:
+        has_data = any(isinstance(info.get(k), (int, float))
+                        for k in ("trailingPE", "returnOnEquity",
+                                   "profitMargins", "marketCap"))
+        if not has_data:
+            sym_bo = f"{ticker}.BO"
+            info_bo = yf.Ticker(sym_bo).info or {}
+            has_bo = any(isinstance(info_bo.get(k), (int, float))
+                          for k in ("trailingPE", "returnOnEquity",
+                                     "profitMargins", "marketCap"))
+            if has_bo:
+                info = info_bo
     row: dict[str, object] = {
         "run_date": datetime.now(timezone.utc).date().isoformat(),
         "ticker": ticker,

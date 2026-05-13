@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import time
 
-import pandas as pd
 import requests
 
 from omni.ingest.sources.nse_flows import _nse_session, _HEADERS_API

@@ -13,9 +13,9 @@ Pillar scoring (each pillar maps to [0, 100] where 50 == neutral):
 
   technical:
     +20 if ret_20d > 0
-    +15 if close > sma_50 > sma_200 (golden trend), -15 if reverse
+    +15 if dist_sma_50 > dist_sma_200 > 0 (close above 50d above 200d), -15 if reverse
     +15 if rsi_14 in (40, 70), -10 if rsi_14 > 80 or < 30
-    +10 if macd_hist > 0
+    +10 if macd_hist_pct > 0
     +10 if vol_ratio < 1 (declining vol)
     + signed component from trend_strength (clipped)
 
@@ -63,12 +63,15 @@ def _score_technical(row: pd.Series) -> float:
     elif pd.notna(row.get("ret_20d")) and row["ret_20d"] < 0:
         s -= 10
 
-    sma50 = row.get("sma_50"); sma200 = row.get("sma_200"); close = row.get("close")
-    # 'close' may not be in features frame; use sma_10 vs sma_50 as fallback
-    if pd.notna(sma50) and pd.notna(sma200):
-        if sma50 > sma200:
+    # Phase 24.17 — features.technical now produces dist_sma_* (unitless
+    # distance from MA) instead of raw sma_*. Use those: dist_sma_50 vs
+    # dist_sma_200 (close above 50d-MA AND above 200d-MA = uptrend).
+    dist50 = row.get("dist_sma_50"); dist200 = row.get("dist_sma_200")
+    if pd.notna(dist50) and pd.notna(dist200):
+        # 50d > 200d distance ≈ "golden cross"-like trend up
+        if dist50 > dist200 and dist200 > 0:
             s += 10
-        else:
+        elif dist50 < dist200 and dist200 < 0:
             s -= 10
 
     rsi = row.get("rsi_14")
@@ -78,7 +81,11 @@ def _score_technical(row: pd.Series) -> float:
         elif rsi > 80 or rsi < 30:
             s -= 10
 
-    if pd.notna(row.get("macd_hist")) and row["macd_hist"] > 0:
+    # macd_hist replaced by macd_hist_pct (% of close) for ticker invariance.
+    macd_h = row.get("macd_hist_pct")
+    if pd.isna(macd_h):
+        macd_h = row.get("macd_hist")  # backwards-compat
+    if pd.notna(macd_h) and macd_h > 0:
         s += 5
     if pd.notna(row.get("vol_ratio")) and row["vol_ratio"] < 1.0:
         s += 5

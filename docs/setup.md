@@ -175,6 +175,20 @@ The reranker (`bge-reranker-base`, ~270 MB) is pulled automatically by
 failure. No setup required beyond having `torch` installed (already in
 `pyproject.toml`).
 
+### HuggingFace token (optional, recommended)
+
+`huggingface_hub` works anonymously, but anonymous traffic is rate-limited
+aggressively. To raise the ceiling for FinBERT + bge-reranker downloads
+(and silence the *"To access higher rate limits, log in"* nag):
+
+1. Create a **Read**-scope token at <https://huggingface.co/settings/tokens>.
+2. Paste it into `.env` as `HF_TOKEN=hf_...`.
+
+`huggingface_hub` auto-detects `HF_TOKEN` on import. No code changes
+required. Both models we use (`ProsusAI/finbert`, `BAAI/bge-reranker-base`)
+are public, so the token only buys you a higher request quota — not access
+to gated models.
+
 ## 13. Run modes
 
 Three ways to run Omni_Stocks, all from the same `omni/` codebase:
@@ -198,6 +212,60 @@ python -m omni.orchestrator.production_runner
 ```
 Single-shot daily run: ingest → features → regime → predict → rubric →
 gate → persist. Atomic parquet writes with read-back validation.
+
+## 14. Daily ops (Phase 24.18 — automated)
+
+The data lake's freshness banner (top-right of the dashboard) goes amber
+after 2 days and red after 5. To keep it green, schedule the daily
+runner to fire at **18:30 IST** (after NSE bhavcopy publishes around
+18:00 IST):
+
+`scripts/run_daily.bat` is the production entry point. It activates the
+venv, invokes `omni.orchestrator.production_runner`, and tees stdout to
+`logs/daily_YYYYMMDD-HHMM.log`.
+
+Install as a Windows scheduled task (PowerShell, **run as Admin**):
+
+```powershell
+$action  = New-ScheduledTaskAction `
+    -Execute "C:\Omni_Stocks\scripts\run_daily.bat"
+$trigger = New-ScheduledTaskTrigger -Daily -At 18:30
+$settings = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+    -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 15) `
+    -StartWhenAvailable -RunOnlyIfNetworkAvailable
+Register-ScheduledTask -TaskName "Omni_Stocks_Daily" `
+    -Action $action -Trigger $trigger -Settings $settings `
+    -RunLevel Highest -Description "Daily ingest + predict pipeline" `
+    -Force
+```
+
+Verify it shows up:
+
+```powershell
+schtasks /Query /TN "Omni_Stocks_Daily" /V /FO LIST
+```
+
+Manual one-off run (skip scheduler):
+
+```powershell
+.\scripts\run_daily.bat
+```
+
+The dashboard's freshness chip should turn green within seconds of the
+log writing `[stage persist] ok`. If you see red after 5 days, check
+`logs/daily_*.log` for the most recent run and look for `WARN`/`ERROR`.
+
+**Historical news backfill** (one-time, takes ~5-25 min depending on
+sleep cadence):
+
+```powershell
+python scripts\backfill_news.py --days 90
+```
+
+This populates `data/lake/news/` with per-day parquet snapshots. Without
+it the trained models see all-zero sentiment features (Sentiment Health
+Score 0/10).
 
 ## Final smoke test
 

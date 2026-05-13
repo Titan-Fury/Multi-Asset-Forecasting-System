@@ -26,7 +26,6 @@ import pandas as pd
 # Allow running as a script from project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omni.lake import io as lake_io       # noqa: E402
 from omni.lake import paths as lake_paths # noqa: E402
 from omni.models.training_utils import recency_weights  # noqa: E402
 from omni.models.xgboost_5d import walkforward_fit  # noqa: E402
@@ -273,6 +272,14 @@ def main() -> int:
     parser.add_argument("--india-specialist", action="store_true",
                           help="ALSO train an India-only specialist head and save "
                                 "to data/models/india_specialist.pkl")
+    parser.add_argument("--asset-classes", default=None,
+                          help="comma-separated asset_class filter for training "
+                                "(e.g. 'india' or 'us,india'). Default: all classes "
+                                "in the training set. Use this to train a market-"
+                                "focused universal model — pairs well with the new "
+                                "ticker-invariant feature set (Phase 24.17) so a "
+                                "model trained only on Indian equities doesn't have "
+                                "the cross-currency scale problem to solve.")
     args = parser.parse_args()
 
     horizons = [int(h.strip()) for h in args.horizons.split(",") if h.strip()]
@@ -297,6 +304,27 @@ def main() -> int:
             return 1
         print("  lake empty; falling back to live-fetch")
         df, used = _build_pooled_live()
+
+    # Phase 24.17 — optional asset-class filter so an "india-only" universal
+    # model can be trained from the same pooled lake. Done before the row
+    # count check so an India-only run doesn't error on min_train when the
+    # full pool would have been fine.
+    if args.asset_classes:
+        wanted = {ac.strip().lower() for ac in args.asset_classes.split(",") if ac.strip()}
+        if "asset_class" not in df.columns:
+            print(f"ERROR: --asset-classes requested but training set has no "
+                   f"'asset_class' column")
+            return 1
+        before = len(df)
+        df = df[df["asset_class"].astype(str).str.lower().isin(wanted)].reset_index(drop=True)
+        used = [t for t in used
+                  if any(t.lower().startswith(f"{ac}/") for ac in wanted)
+                  or t.lower() in wanted
+                  or "/" not in t]   # keep bare-ticker entries (lake mode)
+        print(f"  asset-class filter ({sorted(wanted)}): {before:,} -> {len(df):,} rows")
+        if df.empty:
+            print(f"ERROR: 0 rows left after filtering to {sorted(wanted)}")
+            return 1
 
     print(f"[2/3] training {len(horizons)} horizon model(s) on {df.shape}...")
     print(f"      ensemble={args.ensemble}  target={args.target}  cv={args.cv}")

@@ -17,6 +17,8 @@ on the inference path.
 from __future__ import annotations
 
 import os
+import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +41,23 @@ cb = _try_import("catboost")
 nf = _try_import("neuralforecast")
 
 
+@contextmanager
+def _silence_lgb_feature_name_warning():
+    """LightGBM's sklearn wrapper auto-generates synthetic feature names
+    (Column_0, Column_1, ...) on fit() even when given a numpy array.
+    sklearn >= 1.2 then warns at predict_proba() that "X does not have
+    valid feature names" — a false positive since fit and predict both
+    used arrays. Suppress just that specific warning so real warnings
+    still surface."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*does not have valid feature names.*",
+            category=UserWarning,
+        )
+        yield
+
+
 @dataclass
 class StackResult:
     feature_cols: list[str]
@@ -52,16 +71,17 @@ class StackResult:
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         Xn = X.reindex(columns=self.feature_cols).fillna(self.medians).fillna(0.0)
         bases = []
-        for name, m in self.base_models.items():
-            try:
-                if hasattr(m, "predict_proba"):
-                    p = m.predict_proba(Xn.to_numpy(dtype=float))[:, 1]
-                else:
-                    p = m.predict(Xn.to_numpy(dtype=float))
-            except Exception as e:  # noqa: BLE001
-                log.warning(f"stack base {name} predict failed: {e}")
-                p = np.full(len(Xn), 0.5)
-            bases.append(p)
+        with _silence_lgb_feature_name_warning():
+            for name, m in self.base_models.items():
+                try:
+                    if hasattr(m, "predict_proba"):
+                        p = m.predict_proba(Xn.to_numpy(dtype=float))[:, 1]
+                    else:
+                        p = m.predict(Xn.to_numpy(dtype=float))
+                except Exception as e:  # noqa: BLE001
+                    log.warning(f"stack base {name} predict failed: {e}")
+                    p = np.full(len(Xn), 0.5)
+                bases.append(p)
         Z = np.column_stack(bases)
         return self.meta.predict_proba(Z)[:, 1]
 
@@ -193,10 +213,11 @@ def fit_stack(
                     )
                 else:
                     m.fit(Xtr, ytr)
-                    if hasattr(m, "predict_proba"):
-                        oof[name][va] = m.predict_proba(Xva)[:, 1]
-                    else:
-                        oof[name][va] = m.predict(Xva)
+                    with _silence_lgb_feature_name_warning():
+                        if hasattr(m, "predict_proba"):
+                            oof[name][va] = m.predict_proba(Xva)[:, 1]
+                        else:
+                            oof[name][va] = m.predict(Xva)
             except Exception as e:  # noqa: BLE001
                 log.warning(f"fold {k} base {name} fit failed: {e}")
 

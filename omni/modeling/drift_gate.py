@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-import numpy as np
 import pandas as pd
 
 from omni.modeling.drift import DriftMonitor

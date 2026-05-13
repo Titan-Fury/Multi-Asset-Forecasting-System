@@ -10,7 +10,6 @@ from pathlib import Path
 import pandas as pd
 
 from omni.storage import local as _local
-from omni.utils.logger import log
 from omni.utils.paths import drive_data_root
 
 

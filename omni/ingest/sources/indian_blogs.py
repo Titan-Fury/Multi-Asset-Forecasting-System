@@ -9,12 +9,11 @@ Output schema: [title, url, source, published_at, sent_score].
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 
 import pandas as pd
 import requests
 
-from omni.ingest.sources.indian_rss import _strip_html, _parse_rss
+from omni.ingest.sources.indian_rss import _parse_rss
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
 

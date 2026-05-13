@@ -11,7 +11,6 @@ Schema:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -42,10 +41,13 @@ def news(ticker: str, display_name: str | None = None,
         "sort": "DateDesc",
     }
     try:
-        # GDELT is picky about user-agent
+        # GDELT is picky about user-agent. Phase 24.18 — split timeout into
+        # (connect, read) tuple. GDelt is intermittently unreachable globally
+        # so a 5s connect timeout cuts wait when the API is down; 25s read
+        # timeout still tolerates slow responses on big queries.
         r = requests.get(
             "https://api.gdeltproject.org/api/v2/doc/doc",
-            params=params, timeout=30,
+            params=params, timeout=(5, 25),
             headers={"User-Agent": "Mozilla/5.0 Omni_Stocks/0.1"},
         )
         if r.status_code != 200:
@@ -56,6 +58,12 @@ def news(ticker: str, display_name: str | None = None,
         except ValueError:
             # GDELT occasionally returns malformed JSON; treat as empty
             return pd.DataFrame(columns=_COLS)
+    except (requests.exceptions.ConnectTimeout,
+            requests.exceptions.ConnectionError) as e:
+        # Transient network failures to GDelt are common and self-recover on
+        # the next ingest cycle. Log at DEBUG so the daily logs stay quiet.
+        log.debug(f"gdelt unreachable for {ticker}: {e}")
+        return pd.DataFrame(columns=_COLS)
     except Exception as e:
         log.warning(f"gdelt fetch failed for {ticker}: {e}")
         return pd.DataFrame(columns=_COLS)

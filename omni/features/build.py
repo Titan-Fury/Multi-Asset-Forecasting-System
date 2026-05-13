@@ -28,10 +28,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from omni.features import fundamental as _fund
 from omni.features import macro as _macro
 from omni.features import microstructure as _micro
-from omni.features import sentiment as _sent
 from omni.features import targets as _tgt
 from omni.features import technical as _tech
 from omni.storage import tiers
