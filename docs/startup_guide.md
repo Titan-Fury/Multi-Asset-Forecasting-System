@@ -34,11 +34,26 @@ Open in browser:
 
 - `http://localhost:8501`
 
-Notes:
+### B) FastAPI service (optional headless mode)
 
-- This repo is app-first (Streamlit UI). There is no separate FastAPI/Flask backend server in `omni/` right now.
+The same prediction codebase also runs as a stateless HTTP service for
+downstream callers (cron jobs, dashboards, automated trading bots, etc.):
 
-### B) LLM backend (Ollama, optional but recommended)
+```powershell
+uvicorn omni.api.serve:app --port 8080
+```
+
+Quick checks:
+
+```powershell
+curl http://localhost:8080/health
+curl -X POST http://localhost:8080/predict -H "Content-Type: application/json" -d '{\"ticker\":\"AAPL\",\"asset_class\":\"us\"}'
+```
+
+The typed Python client (`omni/api/client.py`) wraps the same HTTP API
+with connection pooling and retry.
+
+### C) LLM backend (Ollama, optional but recommended)
 
 If Ollama is installed, start/verify it:
 
@@ -90,6 +105,32 @@ python scripts/train_universal_model.py --horizons 1,5,21
 ```powershell
 python scripts/daily_backtest.py
 ```
+
+### Step 5: Production run (cron / systemd / container)
+
+End-to-end single-shot run that wraps ingest + features + regime + predict
++ rubric + gate + persist:
+
+```powershell
+python -m omni.orchestrator.production_runner
+```
+
+### Diagnostic scripts
+
+When something looks off, these read-only scripts surface the issue
+without re-running the full pipeline:
+
+```powershell
+python scripts/check_data_quality.py          # per-ticker DQS + model collapse detector
+python scripts/scan_bugs.py                   # AST-based static bug pattern scan
+python scripts/predict_cianagro.py            # end-to-end smoke test on a single ticker
+python scripts/refresh_predictions.py         # rebuild snapshot-backed UI cache
+python scripts/sample_predictions.py          # spot-check a random universe sample
+```
+
+`check_data_quality.py` was the one that revealed the model-collapse
+case (proba_up std = 0.011 on a stale model) — keep it in your daily
+runbook.
 
 ## 4) Log files and monitoring
 
@@ -183,6 +224,27 @@ Then open `http://localhost:8502`.
 
 - Check symbol format and market suffix (examples: `RELIANCE.NS`, `BTC-USD`, `EURUSD=X`).
 - Inspect warnings in `data\omni.log` for `fetch_prices` / `lookup_ticker`.
+
+### RAG explanation shows deterministic fallback (no "grounded" badge)
+
+The why-text in prediction cards comes from the RAG layer
+(`omni.llm.rag`). When you see deterministic pillar-based text instead of
+a grounded explanation, check in this order:
+
+- `OPENROUTER_API_KEY` is set in `.env` — needed by the Nemotron 1B v2
+  embedder. Without it, embeddings are zeros and Qdrant skips upserts.
+- `data/rag/qdrant/` is writable and not locked by another process.
+- The chosen LLM backend is reachable (`ollama serve` running, or
+  Snowflake Cortex connection healthy, or OpenRouter key valid).
+- Grounding score below threshold (0.55) on first try → pipeline retries
+  once with `temperature=0.1`; second failure → deterministic. Look for
+  `grounding=` in `data/omni.log`.
+
+### NSE OI scraper returning 401 / Cloudflare
+
+- `omni.ingest.sources.nse_oi` does cookie warmup + retry against the
+  NSE site; one-off 401s are expected and auto-retried. If failures
+  persist for an hour+, re-run during NSE market hours.
 
 ## 7) Handy checks
 

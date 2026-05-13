@@ -16,17 +16,11 @@ deployable to a small VPS or containerized environment.
 > and calibrated, and a RAG-backed LLM router produces evidence-cited
 > explanations.
 
-> **For a complete from-scratch explanation of every concept, module, and
-> design decision in this project — read the master guide:**
-> **[`docs/interview_prep_master_guide.md`](docs/interview_prep_master_guide.md).**
+Docs:
 
-Other docs:
-
-- [`docs/architecture.md`](docs/architecture.md) — subsystem design, data flow, phase plan
-- [`docs/architecture_walkthrough.md`](docs/architecture_walkthrough.md) — module-by-module deep dive
-- [`docs/project_tree.md`](docs/project_tree.md) — annotated directory layout
-- [`docs/setup.md`](docs/setup.md) — manual machine setup (Python, Ollama, rclone, API keys)
-- [`docs/startup_guide.md`](docs/startup_guide.md) — first-run quickstart
+- [`docs/architecture.md`](docs/architecture.md) — subsystem design, data flow, module reference
+- [`docs/setup.md`](docs/setup.md) — manual machine setup (Python, Ollama, rclone, Qdrant, API keys)
+- [`docs/startup_guide.md`](docs/startup_guide.md) — first-run quickstart + daily runbook + troubleshooting
 
 ## What it does
 

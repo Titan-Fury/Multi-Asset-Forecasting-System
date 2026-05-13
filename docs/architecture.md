@@ -21,7 +21,7 @@ see [`setup.md`](setup.md). For the project overview, see the top-level
               | fred   |                       |
               +--------+                  +----------+
                                           |  Rubric  |
-                                          | (4 pillar|
+                                          | (9 pillar|
                                           |  x 4 reg)|
                                           +----------+
                                                 ^
@@ -41,8 +41,9 @@ see [`setup.md`](setup.md). For the project overview, see the top-level
 |--------------|---------------------------|-----------------------------------|----------------------------|
 | Raw          | `Z:\Omni_Stocks\raw\...`  | Untransformed source data         | Append-only, dedup'd       |
 | Hot          | `data\hot\`               | Cleaned OHLCV (parquet)           | Refreshed daily            |
-| Features     | `data\features\`          | Engineered ML features            | Rebuilt nightly            |
-| Models       | `data\models\`            | `.joblib` calibrated XGBoost      | Walk-forward retrains      |
+| Lake         | `data\lake\`              | OI snapshots, NSE bhavcopy, FII/DII flows, RAG vector store, monitoring | Append-only / overwrite by date |
+| Features     | `data\features\`          | Engineered ML features incl. microstructure | Rebuilt nightly  |
+| Models       | `data\models\`            | `.joblib` calibrated stack ensembles | Walk-forward retrains   |
 | Predictions  | `data\predictions\<date>` | Per-day signal output             | Append-only                |
 | LLM cache    | `data\cache\llm\`         | diskcache of LLM responses        | TTL per task, 5GB cap, LRU |
 
@@ -69,11 +70,17 @@ adds a Drive-down fallback to `data\raw_fallback\` for resilience.
 - `prices.py` -- OHLCV via yfinance (india/us/fx) and ccxt (crypto). Saves to
   raw + hot tiers in one pass.
 - `fundamentals.py` -- yfinance `Ticker.info` snapshot, 15 fields, keyed by
-  `(ticker, run_date)`.
+  `(ticker, run_date)`. Falls back to **Screener.in** scraper
+  (`sources/screener.py`) for IN equities when yfinance returns sparse data.
 - `news.py` -- NewsAPI per-ticker queries + RSS feeds. Dedup by URL. **Per-
   article sentiment is NOT scored here** -- that's the LLM router's job in the
   feature stage.
 - `macro.py` -- FRED daily series via `fredapi`.
+- `sources/nse_bhavcopy.py` -- NSE bhavcopy (delivery%, traded value).
+- `sources/nse_oi.py` -- F&O option chain with cookie warmup + retry against
+  401 / Cloudflare interstitials. Persists per-ticker snapshots to the lake.
+- `sources/nse_flows.py` -- daily FII/DII net cash flow.
+- `sources/screener.py` -- Screener.in fallback parser for IN fundamentals.
 
 ### `omni.llm`
 - `router.py` -- `Router.route(task, prompt)` looks up `llm_routes.yaml`,
@@ -94,18 +101,55 @@ adds a Drive-down fallback to `data\raw_fallback\` for resilience.
     `snowflake.connector` using a named connection from
     `~/.snowflake/connections.toml`.
 
-### `omni.regime` (Phase 5)
-4-state Gaussian HMM on (returns, realized vol, breadth, VIX) -> regime label
-fed into the rubric.
+### `omni.features`
+9 modules feeding the universal feature schema. Per ticker the daily build
+(`omni.features.build.build_for_ticker`) runs technical → fundamental →
+sentiment → macro → **microstructure** → targets. Microstructure features
+(delivery%, OI change, FII/DII flow z, Amihud illiquidity, signed-volume
+proxy) are now persisted to the lake by the daily walk-forward feature
+build (Phase 24.16); the on-demand path mirrors the same compute via
+`omni.ondemand.features_inline`. Bhavcopy + FII/DII flows are preloaded
+once per universe build and broadcast across all India tickers, avoiding
+N× redundant fetches.
 
-### `omni.models` (Phase 5)
-Walk-forward XGBoost classifier for the 5-day horizon. **Never random-split
-time series.** Calibrated probabilities via Platt or isotonic.
+### `omni.regime`
+4-state Gaussian HMM on (returns, realized vol, breadth, VIX) → regime
+label fed into the rubric. Hardened against degenerate inputs:
+- `_label_states` sorts states by mean and applies stable index-based
+  tiebreak (no more unlabeled states on tied means).
+- A `predict()` probe inside `fit()` catches non-PSD covariance and routes
+  to a fallback model instead of raising at inference time.
+- `_run_with_timeout` only uses SIGALRM on the main thread; daemon-thread
+  fallback used on Windows + worker threads.
 
-### `omni.rubric` (Phase 5)
-Computes a 0-100 score per pillar (technical / fundamental / sentiment /
-macro), applies regime-conditional weights from `rubric.yaml`, returns a
-weighted total.
+### `omni.models`
+**Stack ensemble** (not a single XGBoost): XGBoost + HistGradientBoost +
+LightGBM + N-HiTS base learners with a logistic-regression meta-learner.
+**Walk-forward only** with **purged K-fold** CV (no leakage between train
+and validation across the embargo window). Calibrated probabilities via
+isotonic regression. **Never random-split** time series.
+
+### `omni.rubric`
+**9-pillar scorer**, each pillar producing a 0-100 score:
+
+| # | Pillar | Inputs |
+|---|--------|--------|
+| 1 | technical | momentum, trend, RSI, vol, volume, breakout |
+| 2 | fundamental | valuation, leverage, ROE, growth (yfinance + Screener) |
+| 3 | sentiment | FinBERT-aggregated news + Reddit + GDelt |
+| 4 | macro | VIX, yield curve, DXY, country regime |
+| 5 | microstructure | delivery%, OI change, FII/DII z, Amihud illiq, signed-vol |
+| 6 | oi | F&O PCR, max-pain dist, OI buildup |
+| 7 | relative_strength | RS vs sector + market; pair-signal forward alpha |
+| 8 | insider | bulk/block deals, promoter holding delta, FII/DII broadcast |
+| 9 | earnings_momentum | revenue + earnings growth, EPS revisions, surprises |
+
+Per-regime weights from `rubric.yaml` (bull/bear/chop/crisis), all summing
+to 1.0. **Every pillar degrades to neutral 50** when its input is missing,
+so the system stays robust across asset classes — crypto skips
+fundamental/insider/earnings entirely; non-NSE-F&O names skip OI.
+Backwards-compat: `score_row` uses `weights.get(name, 0.0)` so older
+configs (4/5/6-pillar) still load unchanged.
 
 ### `omni.ensemble` (Phase 6)
 Combines model probability with rubric score; applies the conviction gate
@@ -309,6 +353,46 @@ has a clear acceptance criterion so future agents can resume cleanly:
 Single entry point: mount Drive -> ingest -> features -> regime -> predict ->
 rubric -> gate -> persist -> unmount.
 
+`omni/orchestrator/production_runner.py` wraps the daily run for headless
+deployment (cron, systemd, container). Atomic parquet writes with
+read-back validation in `omni/orchestrator/persist.py`.
+
+### `omni.api` (Phase 24.16)
+Production FastAPI service layer, separate from the Streamlit UI. Lets the
+same prediction code run as a stateless HTTP service for headless callers.
+
+- `app.py` -- FastAPI app with Pydantic schemas for `/predict`, `/health`,
+  `/regime`, `/explain`. Lifespan warmup loads the universal stack ensemble
+  + RAG store before the first request lands.
+- `serve.py` -- uvicorn entry point (`uvicorn omni.api.serve:app`).
+- `client.py` -- typed Python client for downstream callers; uses the same
+  HTTP connection pool pattern (`Session` + `HTTPAdapter` + `Retry`).
+
+### `omni.observability` (Phase 24.16)
+Production telemetry. Graceful fallback when `prometheus_client` isn't
+installed (counters/histograms become no-ops).
+
+- `metrics.py` -- Prometheus counters, histograms, and gauges for
+  prediction latency, cache hit rate, RAG grounding score, regime
+  distribution, and per-backend LLM route success rates.
+- RAG degradation monitor (`omni.llm.rag.degradation`) with rate-limited
+  webhook alerts when grounding falls below threshold across consecutive
+  windows.
+
+### `omni.ondemand` (live prediction path)
+- `predict.py` -- the on-demand prediction entry point. HTTP connection
+  pooling: `_get_session()` (with retries) for predict POSTs vs
+  `_get_probe_session()` (no retries) for `/health` probes — keeps probe
+  latency low when one backend is degraded.
+- `cache.py` -- diskcache with **in-flight singleflight** so concurrent
+  requests for the same `(ticker, asof)` collapse into one upstream call.
+  Cache timestamp is recorded post-completion (not pre-flight) so a hung
+  request can't poison the cache.
+- `pair_signal.py` -- pair-trading forward alpha estimator feeding the
+  relative_strength pillar.
+- `features_inline.py` -- DataFrame-input mirror of the daily feature
+  builder. Identical schema, never persists.
+
 ## LLM routing
 
 `config/llm_routes.yaml` defines two top-level sections:
@@ -349,12 +433,15 @@ stage; the gate then enforces selectivity.
 
 1. **Walk-forward only** -- no `train_test_split`, no `shuffle=True` anywhere
    on time-indexed data.
-2. **Feature timestamps must precede target timestamps** -- enforced by a
+2. **Purged K-fold CV** with embargo window in stack-ensemble training so
+   adjacent train/validation rows can't share information across the fold
+   boundary.
+3. **Feature timestamps must precede target timestamps** -- enforced by a
    `tests/test_no_leakage.py` assertion.
-3. **News features lag by 1 trading day** -- avoids look-ahead from same-day
+4. **News features lag by 1 trading day** -- avoids look-ahead from same-day
    articles published after close.
-4. **Calibration on a held-out walk-forward fold** -- not on the training fold.
-5. **Shuffled baseline** -- a deliberately leakage-free permutation test that
+5. **Calibration on a held-out walk-forward fold** -- not on the training fold.
+6. **Shuffled baseline** -- a deliberately leakage-free permutation test that
    should produce ~50% accuracy. If the real model fails to beat it
    meaningfully, something is wrong.
 
