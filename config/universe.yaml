@@ -5,6 +5,7 @@ asset_classes:
   india:
     suffix: ".NS"   # NSE
     tickers:
+      # ---- Large-cap (Nifty 50 core) ----
       - RELIANCE
       - TCS
       - HDFCBANK
@@ -25,6 +26,37 @@ asset_classes:
       - WIPRO
       - HCLTECH
       - ULTRACEMCO
+      # ---- Midcap / popular trading names (Phase 24.18 broadening) ----
+      - BANKBARODA
+      - IDFCFIRSTB
+      - PNB
+      - YESBANK
+      - LICI                  # LIC of India
+      - TATAPOWER
+      - TATAMOTORS
+      - INDIGO
+      - DLF
+      - GODREJPROP
+      # ---- Smallcap / retail-active names ----
+      - IRCTC
+      - IRFC
+      - RVNL
+      - HUDCO
+      - SUZLON
+      - IDEA                  # Vodafone Idea
+      - IEX
+      - BHEL
+      - PFC
+      - RECLTD
+      # ---- New-age / tech / consumer ----
+      - ZOMATO
+      - NYKAA
+      - PAYTM
+      - POLICYBZR             # PB Fintech
+      - DMART
+      - JIOFIN
+      # ---- Watchlist (user-specific smallcap) ----
+      - CIANAGRO              # Cian Agro Industries — explosive smallcap
 
   us:
     suffix: ""

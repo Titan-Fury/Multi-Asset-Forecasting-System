@@ -110,10 +110,10 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
     target_kind="rank" uses cross-sectional fwd_rank_{H}d binarised at 0.5
                        (above-median performer within (date, asset_class)).
 
-    Saves the stack to data/models/stack_h{H}.pkl. AUC printed; the stack
-    is loadable via pickle and exposes `predict_proba(X)`.
+    Saves the stack to data/models/stack_h{H}.joblib. AUC printed; the stack
+    is loadable via joblib and exposes `predict_proba(X)`.
     """
-    import pickle
+    import joblib
     from pathlib import Path
     from omni.features.targets import add_cross_sectional_rank_targets
     from omni.models.stack import fit_stack
@@ -172,9 +172,8 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
     )
 
     out_dir = Path("data/models"); out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"stack_h{horizon}.pkl"
-    with out_path.open("wb") as f:
-        pickle.dump({"stack": sr, "tickers_used": used, "target_kind": target_kind}, f)
+    out_path = out_dir / f"stack_h{horizon}.joblib"
+    joblib.dump({"stack": sr, "tickers_used": used, "target_kind": target_kind}, out_path)
 
     return {
         "horizon": horizon, "skipped": False, "kind": "stack",

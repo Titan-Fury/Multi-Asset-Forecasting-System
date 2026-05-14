@@ -19,6 +19,7 @@ Notes
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -31,12 +32,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from omni.observability.metrics import metrics
+# Import for side effect: configures loguru + stdlib logging bridge so
+# uvicorn / FastAPI logs flow through the same pipeline.
+from omni.utils.logger import log as _omni_log  # noqa: F401
 
 _log = logging.getLogger("omni.api")
-logging.basicConfig(
-    level=os.environ.get("OMNI_API_LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 
 
 # --------------------------------------------------------------------------
@@ -130,11 +130,17 @@ app = FastAPI(
 )
 
 # CORS — permissive default for local dev; override via env in production.
-_cors_origins = os.environ.get("OMNI_API_CORS_ORIGINS", "*").split(",")
+# When using the wildcard "*", we MUST disable allow_credentials because
+# browsers reject Access-Control-Allow-Origin: * combined with
+# Access-Control-Allow-Credentials: true.
+_cors_origins = [o.strip() for o in
+                  os.environ.get("OMNI_API_CORS_ORIGINS", "*").split(",")
+                  if o.strip()]
+_allow_credentials = "*" not in _cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -234,8 +240,12 @@ async def predict_endpoint(req: PredictRequest) -> dict[str, Any]:
     # Phase 24.16 — observability: time the call and record outcome
     with metrics.timer("prediction_latency_seconds", labels={"path": "live"}):
         try:
-            card = predict_ticker(req.ticker, asset_class,
-                                  display_name=display_name)
+            # predict_ticker is CPU-bound and synchronous — run it in a
+            # threadpool so the FastAPI event loop stays responsive.
+            card = await asyncio.to_thread(
+                predict_ticker, req.ticker, asset_class,
+                display_name=display_name,
+            )
         except Exception as e:  # noqa: BLE001
             metrics.inc("predictions_total",
                         labels={"asset_class": asset_class,
@@ -276,7 +286,8 @@ async def predict_endpoint(req: PredictRequest) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         _log.debug(f"metrics observation failed: {e}")
 
-    _metrics["predictions_total"] += 1
+    with _metrics_lock:
+        _metrics["predictions_total"] += 1
     return d
 
 
@@ -298,8 +309,11 @@ async def predict_deep_endpoint(req: PredictRequest) -> dict[str, Any]:
         display_name = display_name or res.display_name
 
     try:
-        card = deep_analysis(req.ticker, asset_class,
-                             display_name=display_name)
+        # deep_analysis is heavy and synchronous — offload to threadpool.
+        card = await asyncio.to_thread(
+            deep_analysis, req.ticker, asset_class,
+            display_name=display_name,
+        )
     except Exception as e:  # noqa: BLE001
         _log.error(f"deep_analysis {req.ticker}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -310,7 +324,8 @@ async def predict_deep_endpoint(req: PredictRequest) -> dict[str, Any]:
             detail=f"insufficient data for deep analysis on {req.ticker}",
         )
 
-    _metrics["deep_analysis_total"] += 1
+    with _metrics_lock:
+        _metrics["deep_analysis_total"] += 1
     return card.to_dict()
 
 

@@ -45,6 +45,7 @@ class UniversalModel:
     tickers_used: list[str]
     oof_auc: float | None
     horizon_days: int = _LEGACY_HORIZON
+    n_train_rows: int | None = None
 
 
 def _paths_for(horizon: int = _LEGACY_HORIZON) -> tuple[Path, Path]:
@@ -65,20 +66,38 @@ def save(um: UniversalModel) -> Path:
 
 
 def save_horizon(um: UniversalModel, horizon: int) -> Path:
-    """Save a horizon-specific model. ``horizon`` must be in {1, 5, 21}."""
+    """Save a horizon-specific model. ``horizon`` must be in {1, 5, 21}.
+
+    Persists training metadata in two places for robustness:
+      1. Inside the joblib bundle itself (so any caller doing
+         ``joblib.load(path)`` directly gets `trained_at`, `oof_auc`,
+         `tickers_used`, `n_train_rows`, `horizon_days` without needing
+         to read a sidecar file).
+      2. A `<name>.meta.json` sidecar (back-compat with older readers
+         and convenient for quick CLI inspection).
+    """
     if horizon not in _VALID_HORIZONS:
         raise ValueError(f"unsupported horizon {horizon}; valid: {_VALID_HORIZONS}")
     blob, meta = _paths_for(horizon)
-    joblib.dump({
-        "model": um.model, "calibrator": um.calibrator,
-        "feature_cols": um.feature_cols, "medians": um.medians.to_dict(),
-    }, blob)
-    meta.write_text(json.dumps({
-        "trained_at": um.trained_at, "tickers_used": um.tickers_used,
-        "oof_auc": um.oof_auc, "n_features": len(um.feature_cols),
+    metadata = {
+        "trained_at": um.trained_at,
+        "tickers_used": list(um.tickers_used or []),
+        "oof_auc": um.oof_auc,
+        "n_features": len(um.feature_cols),
+        "n_train_rows": getattr(um, "n_train_rows", None),
         "horizon_days": horizon,
-    }, indent=2))
-    log.info(f"universal model saved (h={horizon}d) -> {blob}")
+    }
+    joblib.dump({
+        "model": um.model,
+        "calibrator": um.calibrator,
+        "feature_cols": um.feature_cols,
+        "medians": um.medians.to_dict(),
+        # Embedded metadata (Phase 24.18 — was previously sidecar-only).
+        "metadata": metadata,
+    }, blob)
+    meta.write_text(json.dumps(metadata, indent=2))
+    log.info(f"universal model saved (h={horizon}d) -> {blob} "
+             f"(oof_auc={um.oof_auc}, n_train_rows={metadata['n_train_rows']})")
     return blob
 
 
@@ -102,28 +121,36 @@ def load() -> UniversalModel:
 
 
 def load_horizon(horizon: int) -> UniversalModel | None:
-    """Load a horizon-specific model. Returns None if file is missing."""
+    """Load a horizon-specific model. Returns None if file is missing.
+
+    Reads metadata from the joblib bundle when present (new format), and
+    falls back to the `<name>.meta.json` sidecar for older artifacts.
+    """
     if horizon in _CACHE:
         return _CACHE[horizon]
     blob, meta = _paths_for(horizon)
     if not blob.exists():
         return None
     bundle = joblib.load(blob)
-    metadata = json.loads(meta.read_text()) if meta.exists() else {}
+    embedded = bundle.get("metadata", {}) if isinstance(bundle, dict) else {}
+    sidecar = json.loads(meta.read_text()) if meta.exists() else {}
+    # Prefer embedded metadata; fall back to sidecar; then to defaults.
+    md = {**sidecar, **embedded}  # embedded wins on key overlap
     um = UniversalModel(
         model=bundle["model"],
         calibrator=bundle["calibrator"],
         feature_cols=bundle["feature_cols"],
         medians=pd.Series(bundle["medians"]),
-        trained_at=metadata.get("trained_at", "?"),
-        tickers_used=metadata.get("tickers_used", []),
-        oof_auc=metadata.get("oof_auc"),
-        horizon_days=int(metadata.get("horizon_days", horizon)),
+        trained_at=md.get("trained_at", "?"),
+        tickers_used=md.get("tickers_used", []) or [],
+        oof_auc=md.get("oof_auc"),
+        horizon_days=int(md.get("horizon_days", horizon)),
+        n_train_rows=md.get("n_train_rows"),
     )
     _CACHE[horizon] = um
     log.info(f"universal model loaded (h={horizon}d): "
               f"{len(um.feature_cols)} features, trained {um.trained_at}, "
-              f"oof_auc={um.oof_auc}")
+              f"oof_auc={um.oof_auc}, n_train_rows={um.n_train_rows}")
     return um
 
 

@@ -14,7 +14,7 @@ import pandas as pd
 
 
 _RANK_COLS = (
-    "ret_20d", "ret_60d",                     # momentum
+    "ret_20d",                                # momentum (60d not produced today)
     "rsi_14", "macd_hist_pct", "vol_ratio",   # technical (Phase 24.17: macd_hist_pct)
     "trailing_pe", "profit_margin",           # fundamental
     "return_on_equity", "revenue_growth",

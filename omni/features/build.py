@@ -35,6 +35,7 @@ from omni.features import technical as _tech
 from omni.storage import tiers
 from omni.utils.env import universe
 from omni.utils.logger import log
+from omni.utils.paths import local_data_root
 
 # Columns that are LABELS, never features
 _TARGET_PREFIX = ("fwd_ret_", "fwd_dir_", "fwd_q_")
@@ -48,7 +49,7 @@ def _load_oi_history(ticker: str) -> pd.DataFrame | None:
     """Load per-ticker OI snapshot history from the lake. Phase 24.16 —
     populated daily by `omni.orchestrator.daily` via the (now hardened)
     NSE OI scraper. Returns None if the snapshot file isn't present."""
-    p = Path("data") / "lake" / "oi_snapshots" / f"{ticker.upper()}.parquet"
+    p = local_data_root() / "lake" / "oi_snapshots" / f"{ticker.upper()}.parquet"
     if not p.exists():
         return None
     try:

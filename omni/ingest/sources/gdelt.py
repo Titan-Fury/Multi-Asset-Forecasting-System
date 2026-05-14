@@ -59,9 +59,11 @@ def news(ticker: str, display_name: str | None = None,
             # GDELT occasionally returns malformed JSON; treat as empty
             return pd.DataFrame(columns=_COLS)
     except (requests.exceptions.ConnectTimeout,
+            requests.exceptions.ReadTimeout,
             requests.exceptions.ConnectionError) as e:
-        # Transient network failures to GDelt are common and self-recover on
-        # the next ingest cycle. Log at DEBUG so the daily logs stay quiet.
+        # Transient network failures and slow reads against GDelt are common
+        # and self-recover on the next ingest cycle. Log at DEBUG so the
+        # daily logs stay quiet.
         log.debug(f"gdelt unreachable for {ticker}: {e}")
         return pd.DataFrame(columns=_COLS)
     except Exception as e:

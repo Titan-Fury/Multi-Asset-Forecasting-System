@@ -107,6 +107,13 @@ def _fetch_one(asset_class: str, ticker: str) -> dict:
 
 
 def fetch_fundamentals(asset_class: str, ticker: str) -> pd.DataFrame:
+    # Indices (^NSEI, ^GSPC, ^VIX, ...) and futures don't have fundamentals
+    # in yfinance — skip the lookup entirely instead of letting yfinance
+    # spam the logs with "HTTP Error 404: No fundamentals data found".
+    t = (ticker or "").upper()
+    if t.startswith("^") or t.startswith("=") or "=" in t:
+        log.debug(f"fundamentals: skipping non-equity ticker {ticker!r}")
+        return pd.DataFrame()
     try:
         return pd.DataFrame([_fetch_one(asset_class, ticker)])
     except Exception as e:

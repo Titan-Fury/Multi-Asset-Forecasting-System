@@ -228,31 +228,52 @@ def fit(df_full: pd.DataFrame, *,
     )
 
 
-_DEFAULT_PATH = Path("data/models/circuit_risk_india.pkl")
+def _default_path() -> Path:
+    from omni.utils.paths import models_dir
+    return models_dir() / "circuit_risk_india.joblib"
+
+
+# Legacy artifact (pre-fix) was a pickle. Loader still falls back to it
+# read-only so an existing trained model isn't lost — but new saves go
+# through joblib.
+def _legacy_pickle_path() -> Path:
+    from omni.utils.paths import models_dir
+    return models_dir() / "circuit_risk_india.pkl"
 
 
 def save(model: CircuitRiskModel, path: Path | None = None) -> Path:
-    import pickle
-    p = path or _DEFAULT_PATH
+    import joblib
+    p = path or _default_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("wb") as f:
-        pickle.dump(model, f)
+    joblib.dump(model, p)
     log.info(f"circuit_risk model saved -> {p}")
     return p
 
 
 def load(path: Path | None = None) -> CircuitRiskModel | None:
-    import pickle
-    p = path or _DEFAULT_PATH
-    if not p.exists():
-        return None
-    try:
-        with p.open("rb") as f:
-            m = pickle.load(f)
-        return m
-    except Exception as exc:  # noqa: BLE001
-        log.warning(f"circuit_risk load failed: {exc}")
-        return None
+    import joblib
+    p = path or _default_path()
+    if p.exists():
+        try:
+            return joblib.load(p)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"circuit_risk load failed: {exc}")
+            return None
+    # Fallback: read legacy pickle if present (one-time migration path).
+    legacy = _legacy_pickle_path()
+    if legacy.exists():
+        try:
+            import pickle  # nosec - legacy artifact migration only
+            with legacy.open("rb") as f:
+                m = pickle.load(f)  # nosec
+            log.warning(
+                f"circuit_risk: loaded legacy pickle {legacy}; "
+                "re-run training to migrate to joblib."
+            )
+            return m
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"circuit_risk legacy pickle load failed: {exc}")
+    return None
 
 
 def band(prob: float | None) -> str | None:

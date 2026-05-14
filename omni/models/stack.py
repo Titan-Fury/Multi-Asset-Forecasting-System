@@ -70,11 +70,35 @@ class StackResult:
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         Xn = X.reindex(columns=self.feature_cols).fillna(self.medians).fillna(0.0)
+        # NHITS needs the panel triple (date, ticker, close) — pull from the
+        # original X if present so the base contributes real signal at
+        # inference, not a constant global mean.
+        nhits_panel = None
+        if any(name == "nhits" for name in self.base_models):
+            try:
+                if {"date", "ticker"}.issubset(X.columns):
+                    closes_col = (
+                        "adj_close" if "adj_close" in X.columns
+                        else ("close" if "close" in X.columns else None)
+                    )
+                    if closes_col is not None:
+                        nhits_panel = (
+                            X["date"].to_numpy(),
+                            X["ticker"].astype(str).to_numpy(),
+                            X[closes_col].astype(float).to_numpy(),
+                        )
+            except Exception as e:  # noqa: BLE001
+                log.debug(f"stack: NHITS panel extraction failed: {e}")
+                nhits_panel = None
+
         bases = []
         with _silence_lgb_feature_name_warning():
             for name, m in self.base_models.items():
                 try:
-                    if hasattr(m, "predict_proba"):
+                    if name == "nhits" and nhits_panel is not None and hasattr(m, "predict_panel"):
+                        d, t, c = nhits_panel
+                        p = m.predict_panel(dates=d, tickers=t, closes=c)
+                    elif hasattr(m, "predict_proba"):
                         p = m.predict_proba(Xn.to_numpy(dtype=float))[:, 1]
                     else:
                         p = m.predict(Xn.to_numpy(dtype=float))
@@ -176,10 +200,19 @@ def fit_stack(
     if lgb is not None: base_specs["lgb"] = _new_lgb
     if cb is not None:  base_specs["cb"]  = _new_cb
     has_panel = (tickers is not None and closes is not None)
+    # Phase 24.18 — NHITS DEFAULT-DISABLED. Diagnostic showed its OOF AUC was
+    # 0.4974 (worse than coin flip) across all three horizons, dragging the
+    # ensemble meta-AUC down ~0.005-0.010. Re-enable explicitly with
+    # OMNI_ENABLE_NHITS=1 once the wrapper is fixed (see omni/models/nhits.py).
     use_nhits = (nf is not None and has_panel
+                 and os.environ.get("OMNI_ENABLE_NHITS", "0") == "1"
                  and os.environ.get("OMNI_DISABLE_NHITS", "0") != "1")
     if use_nhits:
         base_specs["nhits"] = lambda: _new_nhits(horizon_days=horizon_days)
+        log.info("stack: NHITS enabled via OMNI_ENABLE_NHITS=1")
+    else:
+        log.info("stack: NHITS disabled (anti-predictive in diagnostics; "
+                 "set OMNI_ENABLE_NHITS=1 to re-enable)")
 
     medians = X.median(numeric_only=True).fillna(0.0)
     X_filled = X.fillna(medians).fillna(0.0)
@@ -237,8 +270,31 @@ def fit_stack(
     Z = np.column_stack([np.where(np.isnan(p), 0.5, p) for p in oof.values()])
     meta = LogisticRegression(C=1.0, max_iter=200)
     meta.fit(Z, y)
+
+    # Honest OOF evaluation of the meta-learner: refit a meta on each fold's
+    # OOF predictions only (using the same purged folds) so we don't report
+    # in-sample AUC. Falls back to predicting 0.5 for the rare case where a
+    # fold is degenerate (single-class y_tr).
+    meta_oof = np.full(len(y), np.nan)
+    for tr, va in folds:
+        Ztr, Zva = Z[tr], Z[va]
+        ytr = y[tr]
+        if len(set(ytr)) < 2:
+            meta_oof[va] = float(np.mean(ytr)) if len(ytr) else 0.5
+            continue
+        try:
+            mm = LogisticRegression(C=1.0, max_iter=200)
+            mm.fit(Ztr, ytr)
+            meta_oof[va] = mm.predict_proba(Zva)[:, 1]
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"meta OOF fold fit failed: {e}")
+            meta_oof[va] = 0.5
     try:
-        meta_oof_auc = float(roc_auc_score(y, meta.predict_proba(Z)[:, 1]))
+        m_mask = ~np.isnan(meta_oof)
+        if m_mask.sum() > 50 and len(set(y[m_mask])) == 2:
+            meta_oof_auc = float(roc_auc_score(y[m_mask], meta_oof[m_mask]))
+        else:
+            meta_oof_auc = 0.0
     except Exception:
         meta_oof_auc = 0.0
 

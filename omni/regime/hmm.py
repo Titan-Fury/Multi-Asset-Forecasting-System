@@ -114,7 +114,15 @@ def _label_states(means: np.ndarray, feature_cols: list[str]) -> dict[int, str]:
 
     # Crisis: highest VIX (or highest realized vol if VIX missing).
     # On ties, np.argmax picks the lowest index (deterministic).
-    severity = means[:, vix_idx] if vix_idx >= 0 else means[:, rv_idx]
+    # Defensive: if BOTH vix and rv are missing, the previous code silently
+    # used means[:, -1] which indexes the last column — wrong. Fall back
+    # to the absolute return magnitude as a severity proxy instead.
+    if vix_idx >= 0:
+        severity = means[:, vix_idx]
+    elif rv_idx >= 0:
+        severity = means[:, rv_idx]
+    else:
+        severity = np.abs(means[:, ret_idx])
     crisis_state = int(np.argmax(severity))
 
     others = sorted(s for s in range(n) if s != crisis_state)

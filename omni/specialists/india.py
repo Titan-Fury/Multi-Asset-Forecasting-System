@@ -9,12 +9,12 @@ characteristics of NSE/BSE data:
   - higher reg_lambda (India fundamentals are noisier)
   - calibrated isotonic regression on a 20% holdout
 
-Saves to data/models/india_specialist.pkl. Loadable via load() — exposes
-predict_proba(X) compatible with the universal-model interface.
+Saves to <models_dir>/india_specialist.joblib. Loadable via load() — exposes
+predict_proba(X) compatible with the universal-model interface (returns
+shape (N, 2) where column 1 is P(up)).
 """
 from __future__ import annotations
 
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from omni.utils.logger import log
+from omni.utils.paths import models_dir
 
 
 @dataclass
@@ -37,13 +38,21 @@ class IndiaSpecialist:
     trained_at: str
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Sklearn-compatible: returns shape (N, 2). Column 1 = P(up)."""
         Xn = X.reindex(columns=self.feature_cols).fillna(self.medians).fillna(0.0)
         Xn = Xn.replace([np.inf, -np.inf], np.nan).fillna(0.0)
         raw = self.model.predict_proba(Xn.to_numpy(dtype=float))[:, 1]
-        return self.calibrator.predict(raw)
+        p = np.asarray(self.calibrator.predict(raw), dtype=float).ravel()
+        p = np.clip(p, 1e-6, 1 - 1e-6)
+        return np.column_stack([1.0 - p, p])
 
 
-_PATH = Path("data/models/india_specialist.pkl")
+def _path() -> Path:
+    return models_dir() / "india_specialist.joblib"
+
+
+def _legacy_path() -> Path:
+    return models_dir() / "india_specialist.pkl"
 
 
 def fit(df_full: pd.DataFrame, *, horizon: int = 5, n_folds: int = 5) -> IndiaSpecialist:
@@ -117,22 +126,38 @@ def fit(df_full: pd.DataFrame, *, horizon: int = 5, n_folds: int = 5) -> IndiaSp
 
 
 def save(spec: IndiaSpecialist) -> Path:
-    _PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _PATH.open("wb") as f:
-        pickle.dump(spec, f)
-    return _PATH
+    import joblib
+    p = _path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(spec, p)
+    log.info(f"india_specialist saved -> {p}")
+    return p
 
 
 def load() -> IndiaSpecialist | None:
-    if not _PATH.exists():
-        return None
-    try:
-        with _PATH.open("rb") as f:
-            return pickle.load(f)
-    except Exception as e:  # noqa: BLE001
-        log.warning(f"india_specialist load failed: {e}")
-        return None
+    import joblib
+    p = _path()
+    if p.exists():
+        try:
+            return joblib.load(p)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"india_specialist load failed: {e}")
+            return None
+    legacy = _legacy_path()
+    if legacy.exists():
+        try:
+            import pickle  # nosec - legacy artifact migration only
+            with legacy.open("rb") as f:
+                spec = pickle.load(f)  # nosec
+            log.warning(
+                f"india_specialist: loaded legacy pickle {legacy}; "
+                "re-run training to migrate to joblib."
+            )
+            return spec
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"india_specialist legacy pickle load failed: {e}")
+    return None
 
 
 def is_available() -> bool:
-    return _PATH.exists()
+    return _path().exists() or _legacy_path().exists()

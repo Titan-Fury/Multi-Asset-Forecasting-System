@@ -154,12 +154,23 @@ def _cached_models(mv_tag: str):
     except Exception as e:  # noqa: BLE001
         log.warning(f"universal load skipped: {e}")
     try:
-        import pickle
+        import joblib as _jl
         from pathlib import Path as _P
-        sp = _P("data") / "models" / "stack_h5.pkl"
-        if sp.exists():
-            with sp.open("rb") as f:
-                sb = pickle.load(f)
+        sp_new = _P("data") / "models" / "stack_h5.joblib"
+        sp_legacy = _P("data") / "models" / "stack_h5.pkl"
+        sb = None
+        if sp_new.exists():
+            sb = _jl.load(sp_new)
+        elif sp_legacy.exists():
+            # Legacy artifact only; warn and read once. Re-train to migrate.
+            import pickle  # nosec - legacy artifact migration only
+            with sp_legacy.open("rb") as f:
+                sb = pickle.load(f)  # nosec
+            log.warning(
+                f"stack: loaded legacy pickle {sp_legacy}; "
+                "re-run scripts/train_universal_model.py to migrate to joblib."
+            )
+        if sb is not None:
             stack_rec = sb.get("stack")
     except Exception as e:  # noqa: BLE001
         log.warning(f"stack load skipped: {e}")

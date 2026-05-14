@@ -118,10 +118,16 @@ def compute_intraday_features(
             mad = float((per_day - med).abs().median()) or 1.0
             out["volume_z_today"] = (today_vol - med) / (1.4826 * mad + 1e-9)
 
-    # 8) range compression: today H-L vs prior-day H-L median
+    # 8) range compression: today H-L vs prior-day H-L median.
+    # Use two simple grouped aggregations + subtract — same result as
+    # `groupby.apply(lambda g: g.high.max() - g.low.min())` but ~10x faster
+    # and avoids the pandas 2.2 DeprecationWarning about apply including
+    # the grouping columns.
     today_range = float(today_bars["high"].max() - today_bars["low"].min())
     if not prior.empty:
-        per_day_range = prior.groupby("day").apply(lambda g: g["high"].max() - g["low"].min())
+        per_day_high = prior.groupby("day")["high"].max()
+        per_day_low = prior.groupby("day")["low"].min()
+        per_day_range = (per_day_high - per_day_low).dropna()
         if len(per_day_range) >= 3 and per_day_range.median() > 0:
             out["range_compression"] = today_range / float(per_day_range.median())
 

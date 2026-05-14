@@ -5,6 +5,7 @@ Uses snowflake.connector with a named connection from
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -15,30 +16,43 @@ from omni.utils.logger import log
 
 class CortexBackend(Backend):
     _conn = None  # class-level lazy connection
+    _conn_lock = threading.Lock()
 
     def _connect(self):
-        if CortexBackend._conn is not None and not CortexBackend._conn.is_closed():
+        # Fast path: connection already alive.
+        c = CortexBackend._conn
+        if c is not None and not c.is_closed():
+            return c
+        # Slow path: serialize creation so two threads don't both connect.
+        with CortexBackend._conn_lock:
+            c = CortexBackend._conn
+            if c is not None and not c.is_closed():
+                return c
+            try:
+                import snowflake.connector
+            except ImportError as e:
+                raise BackendError(
+                    f"snowflake-connector-python not installed: {e}"
+                ) from e
+            conn_name = get_env(self.config.get(
+                "connection_env", "SNOWFLAKE_CONNECTION_NAME"))
+            if not conn_name:
+                raise BackendError("SNOWFLAKE_CONNECTION_NAME not set")
+            try:
+                CortexBackend._conn = snowflake.connector.connect(
+                    connection_name=conn_name)
+            except Exception as e:
+                raise BackendError(f"snowflake connect failed: {e}") from e
+            log.info(f"Cortex connected via '{conn_name}'")
             return CortexBackend._conn
-        try:
-            import snowflake.connector
-        except ImportError as e:
-            raise BackendError(f"snowflake-connector-python not installed: {e}") from e
-        conn_name = get_env(self.config.get("connection_env", "SNOWFLAKE_CONNECTION_NAME"))
-        if not conn_name:
-            raise BackendError("SNOWFLAKE_CONNECTION_NAME not set")
-        try:
-            CortexBackend._conn = snowflake.connector.connect(connection_name=conn_name)
-        except Exception as e:
-            raise BackendError(f"snowflake connect failed: {e}") from e
-        log.info(f"Cortex connected via '{conn_name}'")
-        return CortexBackend._conn
 
     def complete(self, prompt: str, **kwargs: Any) -> LLMResult:
         fn = self.config.get("function", "SNOWFLAKE.CORTEX.COMPLETE").upper()
         t0 = time.monotonic()
-        conn = self._connect()
-        cur = conn.cursor()
+        cur = None
         try:
+            conn = self._connect()
+            cur = conn.cursor()
             if fn.endswith(".SENTIMENT"):
                 cur.execute(f"SELECT {fn}(%s)", (prompt,))
                 row = cur.fetchone()
@@ -60,7 +74,13 @@ class CortexBackend(Backend):
                 latency_ms=(time.monotonic() - t0) * 1000,
                 extra={"function": fn, "model": model},
             )
+        except BackendError:
+            raise
         except Exception as e:
             raise BackendError(f"cortex {fn} failed: {e}") from e
         finally:
-            cur.close()
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:  # noqa: BLE001
+                    pass

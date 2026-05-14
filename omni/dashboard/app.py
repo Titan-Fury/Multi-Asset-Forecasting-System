@@ -1385,6 +1385,99 @@ def _render_dev_tab() -> None:
             except Exception as exc:  # noqa: BLE001
                 st.error(f"uninstall failed: {exc}")
 
+    # --------- Phase 24.18 — Weekly retrain task ---------
+    st.markdown("#### 🔁 Weekly retrain (Sundays 02:00)")
+    st.caption(
+        "Retrains universal models + stack ensemble + India specialist every "
+        "Sunday at 02:00 local time. Reads `config/universe.yaml` so any "
+        "tickers added since last retrain get included. Output goes to "
+        "`logs/retrain_<timestamp>_*.log`. Install/Uninstall require admin."
+    )
+
+    try:
+        from omni.ops import scheduler as _sched
+        _retrain_status = _sched.weekly_retrain_status()
+        _retrain_installed = bool(_retrain_status.get("installed"))
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"weekly retrain status unavailable: {exc}")
+        _retrain_status = {"installed": False}
+        _retrain_installed = False
+
+    inst_chip2 = (
+        "<span style='color:#4ade80;background:rgba(74,222,128,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>INSTALLED</span>"
+        if _retrain_installed else
+        "<span style='color:#f87171;background:rgba(248,113,113,0.12);"
+        "padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;'>NOT INSTALLED</span>"
+    )
+    last_run2 = _retrain_status.get("last_run") or "—"
+    last_result2 = _retrain_status.get("last_result") or "—"
+    next_run2 = _retrain_status.get("next_run") or "—"
+    state2 = _retrain_status.get("state") or "—"
+    st.markdown(
+        f"<div style='font-size:13px;color:#cbd5e1;margin-bottom:8px;'>"
+        f"task: <code style='color:#94a3b8;'>Omni_Stocks_Weekly_Retrain</code> &nbsp;{inst_chip2}<br>"
+        f"<span style='color:#94a3b8;font-size:11px;'>"
+        f"state={_esc(state2)} &nbsp; last_run={_esc(last_run2)} &nbsp; "
+        f"last_result={_esc(last_result2)} &nbsp; next_run={_esc(next_run2)}"
+        f"</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    r_cols = st.columns(4)
+    with r_cols[0]:
+        if st.button(
+            "📥 Activate weekly retrain", use_container_width=True,
+            disabled=(_retrain_installed or not _sched_admin),
+            help="Create scheduled task that runs scripts/run_retrain.bat "
+                 "every Sunday at 02:00 local time. Requires admin.",
+            key="install_weekly_retrain",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.install_weekly_retrain()
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"install failed: {exc}")
+    with r_cols[1]:
+        if st.button(
+            "▶ Run retrain now", use_container_width=True,
+            disabled=not _retrain_installed,
+            help="Trigger retrain immediately (15-30 min). Output to "
+                 "logs/retrain_<timestamp>_*.log.",
+            key="run_weekly_retrain",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.run_weekly_retrain_now()
+                (st.success if ok else st.error)(msg)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"run_now failed: {exc}")
+    with r_cols[2]:
+        if st.button(
+            "📊 Refresh status", use_container_width=True,
+            help="Re-query schtasks for current weekly task state.",
+            key="refresh_weekly_retrain",
+        ):
+            st.rerun()
+    with r_cols[3]:
+        if st.button(
+            "🗑 Deactivate weekly retrain", use_container_width=True,
+            disabled=(not _retrain_installed or not _sched_admin),
+            help="Remove the weekly retrain task. Requires admin.",
+            key="uninstall_weekly_retrain",
+        ):
+            try:
+                from omni.ops import scheduler as _sched
+                ok, msg = _sched.uninstall_weekly_retrain()
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"uninstall failed: {exc}")
+
     st.divider()
 
     # --------- Phase 24.15 — RAG store maintenance ---------

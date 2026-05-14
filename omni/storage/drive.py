@@ -14,10 +14,17 @@ from omni.utils.paths import drive_data_root
 
 
 def is_mounted() -> bool:
-    """Cheap check: does the drive root exist and is it readable?"""
+    """Cheap check: does the drive root exist and contain at least one entry?
+
+    `any(root.iterdir())` returns a bool — comparing it to None was a
+    no-op (`bool is not None` is always True). Empty drives now correctly
+    report unmounted.
+    """
     root = drive_data_root().parent  # Z:\
     try:
-        return root.exists() and any(root.iterdir()) is not None
+        if not root.exists():
+            return False
+        return any(True for _ in root.iterdir())
     except OSError:
         return False
 

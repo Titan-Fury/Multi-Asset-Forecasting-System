@@ -115,11 +115,16 @@ class _FallbackHistogram:
         with self._lock:
             self._n[key] += 1
             self._sums[key] += value
+            # Prometheus histograms are CUMULATIVE: every bucket whose upper
+            # bound is >= the observation gets incremented. The previous
+            # implementation only incremented the first matching bucket,
+            # which made le="..." counts wrong. The +Inf bucket (last slot)
+            # is also always incremented.
+            buckets = self._counts[key]
             for i, b in enumerate(self._buckets):
                 if value <= b:
-                    self._counts[key][i] += 1
-                    return
-            self._counts[key][-1] += 1
+                    buckets[i] += 1
+            buckets[-1] += 1
 
 
 # --------------------------------------------------------------------------

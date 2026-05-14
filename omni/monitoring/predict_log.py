@@ -11,12 +11,18 @@ Used by:
 
 Design choices:
 - Append-only, atomic single-file-per-day → safe under concurrent calls.
+- Concurrent writes from multiple processes (API server + orchestrator)
+  are serialized through a per-file `<path>.lock` sentinel and an atomic
+  rename so partial files never appear on disk.
 - One row per (ticker, asof, horizon) so multi-horizon predictions log multiple rows.
 - Schema is fixed; new fields go to a JSON sidecar to avoid schema drift.
 """
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 
@@ -91,23 +97,63 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
         date_iso = datetime.now(timezone.utc).date().isoformat()
         path = _lake_paths.predictions_path(date_iso)
         _lake_paths.ensure_parent(path)
-        if path.exists():
-            existing = pd.read_parquet(path)
-            df = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
-        else:
-            df = pd.DataFrame([row])
-        # Coerce schema — pad any column missing from the (possibly older)
-        # existing file. None default lets analytics distinguish missing
-        # from explicit zero.
-        for c in _SCHEMA_COLS:
-            if c not in df.columns:
-                df[c] = None
-        df = df[_SCHEMA_COLS]
-        df.to_parquet(path, index=False)
+        # Cross-process safe write: spin briefly on a sidecar lockfile, then
+        # read-modify-write to a temp file and atomically rename. Avoids the
+        # silent clobber that occurred when two writers ran concurrently.
+        _atomic_append_parquet(Path(path), pd.DataFrame([row]))
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning(f"predict_log.log_prediction failed: {exc}")
         return False
+
+
+def _atomic_append_parquet(path: Path, new_rows: pd.DataFrame,
+                           *, lock_timeout_s: float = 5.0) -> None:
+    """Append `new_rows` to `path` (parquet) under a file lock + atomic rename."""
+    lock = path.with_suffix(path.suffix + ".lock")
+    deadline = time.monotonic() + lock_timeout_s
+    fd = None
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                # Stale lock recovery — delete and retry once.
+                try:
+                    lock.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            time.sleep(0.05)
+    try:
+        if path.exists():
+            try:
+                existing = pd.read_parquet(path)
+                df = pd.concat([existing, new_rows], ignore_index=True)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    f"predict_log: existing file unreadable ({exc}); "
+                    "starting fresh."
+                )
+                df = new_rows.copy()
+        else:
+            df = new_rows.copy()
+        for c in _SCHEMA_COLS:
+            if c not in df.columns:
+                df[c] = None
+        df = df[_SCHEMA_COLS]
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        df.to_parquet(tmp, index=False)
+        os.replace(tmp, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def read_predictions_window(start_iso: str, end_iso: str) -> pd.DataFrame:

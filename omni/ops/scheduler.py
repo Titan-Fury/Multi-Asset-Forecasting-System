@@ -13,8 +13,13 @@ Public API:
     uninstall(name)     -> (ok, msg)   removes the task
     run_now(name)       -> (ok, msg)   triggers an immediate run
 
-Convention: tasks are named "Omni_Stocks_Daily" by default. The .bat at
-`scripts/run_daily.bat` is the action; trigger time defaults to 18:30 local.
+    install_weekly_retrain(...)        creates the Sunday 02:00 retrain task
+    uninstall_weekly_retrain()
+    weekly_retrain_status()
+
+Convention:
+    - Daily task    : "Omni_Stocks_Daily"          runs scripts/run_daily.bat at 18:30
+    - Weekly retrain: "Omni_Stocks_Weekly_Retrain" runs scripts/run_retrain.bat Sun 02:00
 """
 from __future__ import annotations
 
@@ -28,6 +33,12 @@ from typing import Optional
 DEFAULT_TASK_NAME = "Omni_Stocks_Daily"
 DEFAULT_HOUR = 18
 DEFAULT_MINUTE = 30
+
+# Phase 24.18 — weekly retrain task
+WEEKLY_TASK_NAME = "Omni_Stocks_Weekly_Retrain"
+WEEKLY_DAY = "SUN"
+WEEKLY_HOUR = 2
+WEEKLY_MINUTE = 0
 
 
 # ----------------------------------------------------------------------- helpers
@@ -48,6 +59,11 @@ def _bat_path() -> Path:
     """Absolute path to the daily runner .bat. Resolved from this file's
     location so it works regardless of cwd."""
     return Path(__file__).resolve().parents[2] / "scripts" / "run_daily.bat"
+
+
+def _retrain_bat_path() -> Path:
+    """Absolute path to the weekly retrain .bat (Phase 24.18)."""
+    return Path(__file__).resolve().parents[2] / "scripts" / "run_retrain.bat"
 
 
 def _run(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
@@ -177,3 +193,72 @@ def run_now(name: str = DEFAULT_TASK_NAME) -> tuple[bool, str]:
     if rc == 0:
         return True, stdout.strip() or f"triggered {name}"
     return False, (stderr or stdout).strip() or f"schtasks failed (rc={rc})"
+
+
+# ============================================================================
+# Phase 24.18 — Weekly retrain task management.
+# Mirrors the daily-task helpers but with a WEEKLY trigger on Sundays at 02:00
+# local time, running scripts/run_retrain.bat which calls
+# `python scripts/retrain_all.py --horizons 1,5,21`.
+# ============================================================================
+
+def weekly_retrain_status() -> dict:
+    """Status of the weekly retrain task. Same shape as status()."""
+    return status(WEEKLY_TASK_NAME)
+
+
+def is_weekly_retrain_installed() -> bool:
+    return is_installed(WEEKLY_TASK_NAME)
+
+
+def install_weekly_retrain(
+    *,
+    day: str = WEEKLY_DAY,
+    hour: int = WEEKLY_HOUR,
+    minute: int = WEEKLY_MINUTE,
+    bat_path: Optional[Path] = None,
+) -> tuple[bool, str]:
+    """Install a weekly Task Scheduler entry for retraining all horizons.
+
+    Default trigger: every Sunday at 02:00 local time. Runs as the current
+    user so the venv + .env + Drive mount are accessible.
+    """
+    if os.name != "nt":
+        return False, "Task Scheduler is Windows-only"
+    if not is_admin():
+        return False, "admin rights required — re-launch as administrator"
+
+    bat = bat_path or _retrain_bat_path()
+    if not bat.exists():
+        return False, (
+            f"runner not found: {bat}\n"
+            "Create scripts/run_retrain.bat first (one-line wrapper around "
+            "`.venv\\Scripts\\python.exe scripts\\retrain_all.py`)."
+        )
+
+    cmd = [
+        "schtasks", "/Create", "/TN", WEEKLY_TASK_NAME,
+        "/TR", f'"{bat}"',
+        "/SC", "WEEKLY",
+        "/D", day.upper(),
+        "/ST", f"{hour:02d}:{minute:02d}",
+        "/RL", "HIGHEST",
+        "/F",
+    ]
+    rc, stdout, stderr = _run(cmd, timeout=20)
+    if rc == 0:
+        return True, stdout.strip() or (
+            f"installed {WEEKLY_TASK_NAME} @ {day.upper()} "
+            f"{hour:02d}:{minute:02d}"
+        )
+    return False, (stderr or stdout).strip() or f"schtasks failed (rc={rc})"
+
+
+def uninstall_weekly_retrain() -> tuple[bool, str]:
+    """Remove the weekly retrain task. Requires admin."""
+    return uninstall(WEEKLY_TASK_NAME)
+
+
+def run_weekly_retrain_now() -> tuple[bool, str]:
+    """Trigger an immediate run of the weekly retrain task."""
+    return run_now(WEEKLY_TASK_NAME)

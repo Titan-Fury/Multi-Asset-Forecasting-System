@@ -1,7 +1,9 @@
 """Forward-return targets.
 
 For a given horizon (1, 5, 20 business days), compute:
-  fwd_ret_<H>d  -- forward log return adj_close[t+H] / adj_close[t] - 1
+  fwd_ret_<H>d  -- forward simple return adj_close[t+H] / adj_close[t] - 1
+                   (NOT log return — keep this consistent with downstream
+                   PnL and ranking metrics.)
   fwd_dir_<H>d  -- sign(fwd_ret), with neutral band optional
   fwd_q_<H>d    -- quintile bucket (0..4) per (asset_class, date)
 
@@ -15,7 +17,7 @@ import pandas as pd
 
 
 def add_cross_sectional_rank_targets(df: pd.DataFrame, *,
-                                     horizons: tuple[int, ...] = (1, 5, 21)) -> pd.DataFrame:
+                                     horizons: tuple[int, ...] = (1, 5, 20)) -> pd.DataFrame:
     """Add `fwd_rank_<H>d` columns: percentile rank of `fwd_ret_<H>d` within
     each (date, asset_class). Output is float in [0, 1]; the binary direction
     target stays untouched.

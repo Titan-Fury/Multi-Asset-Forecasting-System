@@ -14,11 +14,26 @@ Run:
 """
 from __future__ import annotations
 
+import sys
 import warnings
 
 import pandas as pd
 
+# Force UTF-8 stdout/stderr on Windows so unicode block chars (█) and emoji
+# don't crash with `'charmap' codec can't encode`.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 warnings.filterwarnings("ignore")
+
+# Initialize logger early so internal omni.* INFO/WARNING logs are written to
+# the rotating log file in logs/ before the first heavy import.
+from omni.utils.logger import log  # noqa: E402
+
+log.info("predict_cianagro: probe start")
 
 
 def _section(title: str) -> None:

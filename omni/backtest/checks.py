@@ -39,15 +39,29 @@ def assert_no_target_leakage(model_feature_cols: list[str]) -> None:
 
 
 def assert_chronological_splits(folds) -> None:
-    """Each fold's max(train_dates) must be < min(test_dates)."""
+    """Each fold's max(train_dates) must be < min(test_dates).
+
+    Also asserts that test windows do not overlap across folds (a strictly
+    increasing sequence). Folds without `train_dates` exposed only get the
+    cross-fold ordering check; the per-fold leakage assertion is skipped.
+    """
     for i, fr in enumerate(folds):
-        if not hasattr(fr, "test_dates"):
-            continue
-        # we need train dates too; expose via fr.train_dates if added later
-        # for now check test dates strictly increase across folds
-        if i > 0:
-            prev = folds[i - 1].test_dates.max()
-            cur = fr.test_dates.min()
+        # Per-fold: train must end strictly before test begins.
+        train_dates = getattr(fr, "train_dates", None)
+        test_dates = getattr(fr, "test_dates", None)
+        if train_dates is not None and test_dates is not None and \
+                len(train_dates) and len(test_dates):
+            tr_max = pd.Timestamp(train_dates.max())
+            te_min = pd.Timestamp(test_dates.min())
+            if tr_max >= te_min:
+                raise LeakageError(
+                    f"fold {i}: train ends {tr_max} but test starts {te_min} "
+                    "(train must end strictly before test begins)"
+                )
+        # Cross-fold: test windows shouldn't overlap.
+        if i > 0 and test_dates is not None:
+            prev = pd.Timestamp(folds[i - 1].test_dates.max())
+            cur = pd.Timestamp(test_dates.min())
             if cur < prev:
                 raise LeakageError(
                     f"fold {i} test starts {cur} before fold {i-1} ends {prev}"

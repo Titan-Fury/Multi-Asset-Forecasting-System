@@ -52,14 +52,29 @@ backends:
       rpd: 200
     enabled: true
 
-  # Phase 24.18 — Nemotron chat fallback. MiniMax M2.5 free is intermittently
-  # rate-limited / down upstream; Nemotron-3-Super-120B (MoE, 12B active) is
-  # the strongest free chat model on OpenRouter and works as a drop-in.
+  # Phase 24.18 — Nemotron chat = NEW PRIMARY for finance / signal explanation.
+  # NVIDIA Nemotron-3-Super-120B (MoE, 12B active) is the strongest free
+  # general-purpose reasoner currently on OpenRouter (262K ctx, no daily 50-req
+  # cap that MiniMax M2.5 free tier imposes), and it handles finance-domain
+  # reasoning well in practice. MiniMax is kept as fallback because it is
+  # often rate-limited upstream (HTTP 429 "Provider returned error").
   openrouter_nemotron_chat:
     type: openrouter
     api_key_env: OPENROUTER_API_KEY
     model: nvidia/nemotron-3-super-120b-a12b:free
     timeout_s: 90
+    rate_limit:
+      rpm: 18
+      rpd: 200
+    enabled: true
+
+  # Phase 24.18 — Nemotron-3-Nano-Omni Reasoning. Faster than Super-120B for
+  # short-context tasks; reasoning variant (chain-of-thought enabled).
+  openrouter_nemotron_omni_reason:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    timeout_s: 60
     rate_limit:
       rpm: 18
       rpd: 200
@@ -71,6 +86,42 @@ backends:
     api_key_env: OPENROUTER_API_KEY
     model: nvidia/nemotron-nano-9b-v2:free
     timeout_s: 60
+    rate_limit:
+      rpm: 18
+      rpd: 200
+    enabled: true
+
+  # Qwen3-Next-80B (MoE, 3B active) — strong general/finance reasoner with
+  # 262K ctx. Competitive with Nemotron-3-Super on benchmark reasoning.
+  openrouter_qwen3_next_80b:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: qwen/qwen3-next-80b-a3b-instruct:free
+    timeout_s: 90
+    rate_limit:
+      rpm: 18
+      rpd: 200
+    enabled: true
+
+  # DeepSeek V4 Flash — DeepSeek consistently scores high on financial
+  # reasoning + math benchmarks, and Flash is the fast variant. 256K ctx.
+  openrouter_deepseek_v4_flash:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: deepseek/deepseek-v4-flash:free
+    timeout_s: 60
+    rate_limit:
+      rpm: 18
+      rpd: 200
+    enabled: true
+
+  # OpenAI gpt-oss-120b — OpenAI open-weights flagship; useful as a
+  # capability-tier fallback when the others are rate-limited.
+  openrouter_gpt_oss_120b:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: openai/gpt-oss-120b:free
+    timeout_s: 90
     rate_limit:
       rpm: 18
       rpd: 200
@@ -168,17 +219,18 @@ tasks:
     cache_ttl_days: 30
 
   daily_market_synthesis:
-    # cortex_claude demoted to fallback because snowflake-connector-python
-    # isn't always installed; the router was logging 2 warnings per call.
-    # Promote groq_llama70b which is fast + Llama 3.1 70B class.
-    primary: [groq_llama70b]
-    fallback: [openrouter_nemotron_chat, gemini_flash, cortex_claude, cortex_llama405, openrouter_llama70b]
+    # Nemotron-3-Super promoted to primary (free, MoE 120B/12B-active, 262K ctx,
+    # no per-day 50-req cap that bites MiniMax). Groq Llama-3.3-70B is a
+    # very fast secondary; MiniMax kept further down because it intermittently
+    # 429s upstream.
+    primary: [openrouter_nemotron_chat]
+    fallback: [groq_llama70b, openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, gemini_flash, openrouter_gpt_oss_120b, cortex_claude, cortex_llama405, openrouter_llama70b]
     cache_ttl_days: 1
     cost_class: paid
 
   signal_explanation:
-    primary: [openrouter_minimax_free]
-    fallback: [groq_llama70b, openrouter_nemotron_chat, gemini_flash, ollama_qwen, openrouter_gemma, openrouter_nemotron_nano, cortex_claude]
+    primary: [openrouter_nemotron_chat]
+    fallback: [openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, groq_llama70b, openrouter_nemotron_omni_reason, gemini_flash, openrouter_gpt_oss_120b, ollama_qwen, openrouter_gemma, openrouter_nemotron_nano, cortex_claude]
     cache_ttl_days: 1
 
   # Phase 24.15 — RAG-grounded signal explanation. Same backend chain but
@@ -191,12 +243,12 @@ tasks:
   #   rag.retrieval.top_k           number of chunks fed to the LLM
   #   rag.validators.grounding_min  sentence-cosine threshold for is_safe
   signal_explanation_rag:
-    # MiniMax M2.5 (free) is currently the strongest free OpenRouter model
-    # by benchmarks (SWE-Bench 80.2%, BrowseComp 76.3%, 197K context) and
-    # has reasoning support — well-suited to citation-heavy RAG outputs.
-    # groq_llama70b kept as fast fallback (~1-3s vs M2.5 ~3-5s).
-    primary: [openrouter_minimax_free]
-    fallback: [groq_llama70b, openrouter_nemotron_chat, gemini_flash, openrouter_llama70b, ollama_qwen, cortex_claude]
+    # User preference (Phase 24.18): Nemotron PRIMARY (best free reasoner for
+    # finance), MiniMax M2.5 demoted to fallback because it is constantly
+    # rate-limited upstream (429s). Qwen3-Next-80B and DeepSeek-V4-Flash are
+    # added as additional strong free reasoners ahead of MiniMax.
+    primary: [openrouter_nemotron_chat]
+    fallback: [openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, groq_llama70b, openrouter_nemotron_omni_reason, gemini_flash, openrouter_gpt_oss_120b, openrouter_llama70b, ollama_qwen, cortex_claude]
     cache_ttl_days: 1
     cost_class: free
     rag:
