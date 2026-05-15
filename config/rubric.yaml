@@ -86,7 +86,16 @@ regimes:
       insider: 0.06
       earnings_momentum: 0.06
 
-# Conviction gate: minimum score to emit a signal
+# Conviction gate: minimum score to emit a signal.
+#
+# Phase 24.18 — calibrated empirically against the model's actual proba spread.
+# A 13-ticker probe (mix of large-cap, midcap, smallcap) showed:
+#   - 9/11 names with prediction conviction in 4-10 (noise band)
+#   - 2/11 names (SUZLON 18.5, CIANAGRO 18.8) — the ones rallying parabolically
+# At stack OOF AUC ~0.515 the realistic conviction ceiling is ~20-40, so
+# min_conviction=15 lets through the top ~20% of signals while filtering
+# the noise floor. Raise back toward 30-50 once stack OOF AUC exceeds 0.55,
+# and toward 70 only at OOF AUC ~0.60+.
 gating:
-  min_conviction: 70.0
-  require_regime_supportive: true   # only emit longs in bull/chop, shorts in bear
+  min_conviction: 15.0
+  require_regime_supportive: true   # only emit longs in bull/chop, shorts in bear/crisis

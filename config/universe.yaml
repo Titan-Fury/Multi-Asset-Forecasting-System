@@ -33,7 +33,6 @@ asset_classes:
       - YESBANK
       - LICI                  # LIC of India
       - TATAPOWER
-      - TATAMOTORS
       - INDIGO
       - DLF
       - GODREJPROP
@@ -49,7 +48,7 @@ asset_classes:
       - PFC
       - RECLTD
       # ---- New-age / tech / consumer ----
-      - ZOMATO
+      - ETERNAL               # Zomato renamed to Eternal (2024)
       - NYKAA
       - PAYTM
       - POLICYBZR             # PB Fintech
