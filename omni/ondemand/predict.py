@@ -196,29 +196,39 @@ def _cached_models(mv_tag: str):
             )
     except Exception as e:  # noqa: BLE001
         log.debug(f"circuit-risk load skipped: {e}")
-    # Phase 24.18 — meta-labelling head (de Prado AFML §3.6). Predicts
+    # Phase 24.18 — meta-labelling heads (de Prado AFML §3.6). Predicts
     # P(primary signal is correct) given primary outputs + risk-state cols.
     # Used as a SECONDARY filter: signals where meta_p < 0.45 are
     # downweighted toward 0.5 (less conviction). Loaded lazily; absence is
     # non-fatal — predict.py just returns the raw stack proba.
-    meta_head = None
+    #
+    # Phase 24.18b — multi-horizon: separate heads for h={1,5,21}. Stored as
+    # `meta_heads[h]` -> (model, MetaResult). The h=5 entry is the legacy
+    # `meta_head` exposed via `meta_heads[5]`. Code that wants a specific
+    # horizon should look up `meta_heads.get(h)`.
+    meta_heads: dict[int, object] = {}
     try:
         from omni.modeling.meta_label import load_meta as _load_meta
         from pathlib import Path as _P
-        mp = _P("data") / "models" / "meta_h5.joblib"
-        if mp.exists():
-            obj = _load_meta(mp)
-            if obj is not None:
-                meta_head = obj  # (model, MetaResult)
-                _, mr = meta_head
-                log.info(
-                    f"meta-labelling head loaded: oof_auc={mr.auc_oof:.4f} "
-                    f"feats={len(mr.feature_cols)}"
-                )
+        for h in (1, 5, 21):
+            mp = _P("data") / "models" / f"meta_h{h}.joblib"
+            if mp.exists():
+                obj = _load_meta(mp)
+                if obj is not None:
+                    meta_heads[h] = obj
+                    _, mr = obj
+                    log.info(
+                        f"meta-labelling head h={h} loaded: "
+                        f"oof_auc={mr.auc_oof:.4f} feats={len(mr.feature_cols)}"
+                    )
     except Exception as e:  # noqa: BLE001
         log.debug(f"meta-labelling load skipped: {e}")
+    # Back-compat: callers previously expected a single `meta_head`. Expose
+    # the h=5 head under that name when present.
+    meta_head = meta_heads.get(5)
     _MODEL_CACHE.clear()
-    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model, meta_head)
+    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model,
+                              meta_head, meta_heads)
     return _MODEL_CACHE[mv_tag]
 
 
@@ -720,12 +730,13 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                        if c not in _DROP_ALWAYS and not is_target_col(c)]]
     feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
 
-    universal, stack_rec, _conformal, circuit_model, meta_head = _cached_models(_model_version_tag())
+    universal, stack_rec, _conformal, circuit_model, meta_head, meta_heads = _cached_models(_model_version_tag())
     proba, kind = _score_one(feat_only, universal=universal,
                               stack_rec=stack_rec, asset_class=asset_class,
                               meta_head=meta_head)
 
     # Multi-horizon predictions reuse the same feat_only frame.
+    # h=5 already has meta-shrinkage applied via _score_one above.
     per_horizon: dict[int, float] = {5: proba}
     if universal is not None:
         for h in (1, 21):
@@ -737,7 +748,42 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                 continue
             try:
                 X_h = _align_to_universal(feat_only, um_h)
-                per_horizon[h] = float(um_h.calibrator.predict_proba(X_h)[0, 1])
+                p_h = float(um_h.calibrator.predict_proba(X_h)[0, 1])
+                # Phase 24.18b — apply per-horizon meta-labelling shrinkage
+                # to h=1 and h=21 just like _score_one does for h=5. h=1
+                # benefits the most because its primary AUC is highest
+                # (~0.69 with TB labels).
+                meta_h_pair = meta_heads.get(h)
+                if meta_h_pair is not None:
+                    try:
+                        from omni.modeling.meta_label import apply_meta
+                        m_model_h, m_result_h = meta_h_pair
+                        if m_result_h.auc_oof and m_result_h.auc_oof >= 0.52:
+                            primary_dir_h = 1.0 if p_h > 0.5 else -1.0
+                            meta_row = {
+                                "primary_p": p_h,
+                                "primary_conviction": abs(p_h - 0.5) * 200.0,
+                                "primary_dir": primary_dir_h,
+                            }
+                            for c in ("rsi_14", "atr_pct_14", "vol_ratio",
+                                      "dist_from_52w_high", "dist_from_52w_low",
+                                      "macd_hist_pct", "ret_5d", "ret_20d"):
+                                if c in feat_only.columns:
+                                    v = feat_only[c].iloc[0]
+                                    meta_row[c] = float(v) if pd.notna(v) else 0.0
+                            meta_df = pd.DataFrame([meta_row])
+                            meta_p_h = float(apply_meta(
+                                m_model_h, meta_df, m_result_h.feature_cols
+                            )[0])
+                            shrunk_h = 0.5 + (p_h - 0.5) * meta_p_h
+                            log.debug(
+                                f"meta shrink h={h}: raw={p_h:.3f} "
+                                f"meta_p={meta_p_h:.3f} -> {shrunk_h:.3f}"
+                            )
+                            p_h = shrunk_h
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning(f"meta-labelling h={h} apply failed: {exc}")
+                per_horizon[h] = p_h
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"horizon model h={h} predict failed: {exc}")
 
