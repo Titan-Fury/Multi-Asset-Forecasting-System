@@ -84,9 +84,13 @@ def fit(df_full: pd.DataFrame, *, horizon: int = 5, n_folds: int = 5) -> IndiaSp
     y = (df[target].astype(int) > 0).astype(int).to_numpy()
     dates = pd.to_datetime(df["date"])
 
-    # OOF predictions via purged K-fold + embargo
-    folds = purged_kfold_indices(dates, n_folds=n_folds,
-                                 horizon_days=horizon, embargo_days=horizon)
+    # OOF predictions via purged K-fold + embargo. Phase 24.18 — per-ticker
+    # purging via the `tickers` arg so cross-ticker rows aren't lost.
+    folds = purged_kfold_indices(
+        dates, n_folds=n_folds,
+        horizon_days=horizon, embargo_days=horizon,
+        tickers=df["ticker"] if "ticker" in df.columns else None,
+    )
     oof = np.full(len(df), np.nan)
     for tr, va in folds:
         m = XGBClassifier(

@@ -178,9 +178,12 @@ def fit(df_full: pd.DataFrame, *,
         f"base_rate={base_rate:.4f} scale_pos_weight={spw:.2f} feats={len(feats)}"
     )
 
-    # OOF eval via purged K-fold + embargo (same as stack)
+    # OOF eval via purged K-fold + embargo (same as stack). Phase 24.18 —
+    # per-ticker purging via the `tickers` arg.
     folds = purged_kfold_indices(
-        dates, n_folds=n_folds, horizon_days=horizon, embargo_days=horizon * 2,
+        dates, n_folds=n_folds,
+        horizon_days=horizon, embargo_days=horizon * 2,
+        tickers=df["ticker"] if "ticker" in df.columns else None,
     )
     oof = np.full(len(y), np.nan)
     fold_pr: list[float] = []

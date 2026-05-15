@@ -190,8 +190,14 @@ def fit_stack(
     from sklearn.metrics import roc_auc_score
 
     embargo = horizon_days if embargo_days is None else embargo_days
-    folds = purged_kfold_indices(dates, n_folds=n_folds,
-                                 horizon_days=horizon_days, embargo_days=embargo)
+    # Phase 24.18 — pass `tickers` so purging is per-ticker (de Prado AFML §7).
+    # Cross-ticker train rows in the val window aren't actually leaks; the
+    # global purge throws them out unnecessarily. Per-ticker keeps them.
+    folds = purged_kfold_indices(
+        dates, n_folds=n_folds,
+        horizon_days=horizon_days, embargo_days=embargo,
+        tickers=tickers,
+    )
     if not folds:
         raise RuntimeError("purged_kfold_indices produced no folds")
 

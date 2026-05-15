@@ -44,13 +44,19 @@ MODELS = Path("data/models")
 TRAIN = Path("data/lake/training/training_set.parquet")
 
 
-def _train_primary_oof(X_arr, y, dates, *, horizon: int, n_folds: int = 5):
-    """Walk-forward OOF probas via purged k-fold + embargo."""
+def _train_primary_oof(X_arr, y, dates, *, horizon: int, tickers=None,
+                        n_folds: int = 5):
+    """Walk-forward OOF probas via purged k-fold + embargo.
+
+    Phase 24.18 — when `tickers` is provided, the purge is per-ticker so
+    cross-ticker training rows aren't lost.
+    """
     import xgboost as xgb
     from sklearn.metrics import roc_auc_score
 
     folds = purged_kfold_indices(dates, n_folds=n_folds,
-                                  horizon_days=horizon, embargo_days=horizon)
+                                  horizon_days=horizon, embargo_days=horizon,
+                                  tickers=tickers)
     oof = np.full(len(y), np.nan)
     for k, (tr, va) in enumerate(folds):
         m = xgb.XGBClassifier(
@@ -90,12 +96,15 @@ def _train_one(df: pd.DataFrame, X_filled: pd.DataFrame, X_arr,
     y = (df.loc[sub_mask, tb_col].astype(int) == 1).astype(int).to_numpy()
     X_arr_h = X_arr[sub_mask]
     dates_h = dates[sub_mask]
+    tickers_h = df.loc[sub_mask, "ticker"].astype(str).reset_index(drop=True) \
+        if "ticker" in df.columns else None
 
     log.info(f"h={horizon}: training primary (n={len(y):,}, "
              f"base_rate={y.mean():.4f})")
     t0 = time.time()
     primary_oof, primary_auc = _train_primary_oof(X_arr_h, y, dates_h,
-                                                    horizon=horizon)
+                                                    horizon=horizon,
+                                                    tickers=tickers_h)
     log.info(f"h={horizon}: primary OOF AUC={primary_auc:.4f} "
              f"in {time.time()-t0:.1f}s")
 
