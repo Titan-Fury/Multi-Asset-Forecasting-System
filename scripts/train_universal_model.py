@@ -128,6 +128,19 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
             return {"horizon": horizon, "skipped": True, "reason": "rank target build failed"}
         sub = sub.dropna(subset=[rank_col])
         y = (sub[rank_col].astype(float) >= 0.5).astype(int).to_numpy()
+    elif target_kind == "tb":
+        # Phase 24.18 — triple-barrier label. Requires augment_triple_barrier
+        # to have been run on the training set first. tb_label_<H>d is in
+        # {-1, 0, +1}; we binarise as (== +1) so the positive class is
+        # "PT hit before SL within H days" (de Prado AFML §3.4).
+        # In a 622K-row diagnostic this lifted OOF AUC from 0.513 (fwd_dir)
+        # to 0.602 — the single biggest target-redesign win in the project.
+        tb_col = f"tb_label_{horizon}d"
+        if tb_col not in sub.columns:
+            return {"horizon": horizon, "skipped": True,
+                    "reason": f"{tb_col} missing — run scripts/augment_triple_barrier.py first"}
+        sub = sub.dropna(subset=[tb_col])
+        y = (sub[tb_col].astype(int) == 1).astype(int).to_numpy()
     else:
         target = f"fwd_dir_{horizon}d"
         if target not in sub.columns:
@@ -261,10 +274,14 @@ def main() -> int:
                           help="single = current XGB+isotonic. stack = XGB+HGB(+LGBM+CB) "
                                 "+ logistic meta on PURGED-kfold OOF preds.")
     parser.add_argument("--target", default="dir",
-                          choices=("dir", "rank"),
+                          choices=("dir", "rank", "tb"),
                           help="dir = binary fwd_dir_<H>d. rank = cross-sectional "
                                 "percentile rank of fwd_ret (Numerai-style); "
-                                "binarised at 0.5 for the classifier head.")
+                                "binarised at 0.5 for the classifier head. "
+                                "tb = triple-barrier (de Prado): label=1 iff price "
+                                "hits +2σ before -1σ within the horizon. Requires "
+                                "scripts/augment_triple_barrier.py first. Empirically "
+                                "lifts OOF AUC ~0.09 vs dir on the same features.")
     parser.add_argument("--cv", default="walkforward",
                           choices=("walkforward", "purged"),
                           help="purged = de-Prado purged K-fold + embargo (leakage-free)")

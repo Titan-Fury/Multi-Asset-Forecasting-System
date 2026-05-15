@@ -37,8 +37,15 @@ from omni.utils.env import universe
 from omni.utils.logger import log
 from omni.utils.paths import local_data_root
 
-# Columns that are LABELS, never features
-_TARGET_PREFIX = ("fwd_ret_", "fwd_dir_", "fwd_q_")
+# Columns that are LABELS, never features.
+# Phase 24.18 — added tb_label_ / tb_first_ (triple-barrier labels), and
+# fwd_rank_ (cross-sectional rank labels). Without these prefixes
+# `is_target_col()` was leaking labels into the feature matrix when
+# `--target tb` or `--target rank` was used, producing fake AUC=1.0.
+_TARGET_PREFIX = (
+    "fwd_ret_", "fwd_dir_", "fwd_q_", "fwd_rank_",
+    "tb_label_", "tb_first_",
+)
 
 
 def is_target_col(c: str) -> bool:
