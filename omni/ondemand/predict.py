@@ -196,19 +196,48 @@ def _cached_models(mv_tag: str):
             )
     except Exception as e:  # noqa: BLE001
         log.debug(f"circuit-risk load skipped: {e}")
+    # Phase 24.18 — meta-labelling head (de Prado AFML §3.6). Predicts
+    # P(primary signal is correct) given primary outputs + risk-state cols.
+    # Used as a SECONDARY filter: signals where meta_p < 0.45 are
+    # downweighted toward 0.5 (less conviction). Loaded lazily; absence is
+    # non-fatal — predict.py just returns the raw stack proba.
+    meta_head = None
+    try:
+        from omni.modeling.meta_label import load_meta as _load_meta
+        from pathlib import Path as _P
+        mp = _P("data") / "models" / "meta_h5.joblib"
+        if mp.exists():
+            obj = _load_meta(mp)
+            if obj is not None:
+                meta_head = obj  # (model, MetaResult)
+                _, mr = meta_head
+                log.info(
+                    f"meta-labelling head loaded: oof_auc={mr.auc_oof:.4f} "
+                    f"feats={len(mr.feature_cols)}"
+                )
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"meta-labelling load skipped: {e}")
     _MODEL_CACHE.clear()
-    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model)
+    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model, meta_head)
     return _MODEL_CACHE[mv_tag]
 
 
 def _score_one(feat_only: pd.DataFrame,
-               *, universal, stack_rec, asset_class: str
+               *, universal, stack_rec, asset_class: str,
+               meta_head=None,
                ) -> tuple[float, str]:
     """Score a single live-row feature vector through universal/stack/specialist.
 
     Returns (proba_up, model_kind). Centralizes the alignment so we don't
     re-reindex/refill for each base learner. If universal is None we return
     (0.5, 'rubric_only').
+
+    Phase 24.18 — when a meta-labelling head is available, the primary's
+    raw proba is shrunk toward 0.5 by `meta_p` (the head's estimate of
+    signal correctness). This is the de Prado §3.6 bet-sizing pattern:
+    final_proba_up = 0.5 + (raw_proba - 0.5) * meta_p
+    Effect: confident primaries that the meta agrees with stay sharp;
+    primaries the meta distrusts get pulled to 50/50 (low conviction).
     """
     if universal is None:
         return 0.5, "rubric_only"
@@ -244,6 +273,40 @@ def _score_one(feat_only: pd.DataFrame,
                     log.info(f"india specialist auc={spec.oof_auc:.3f} <0.51, skipped")
         except Exception as exc:  # noqa: BLE001
             log.warning(f"india specialist score failed: {exc}")
+
+    # Phase 24.18 — meta-labelling shrinkage. Skip if the meta head's OOF AUC
+    # is too weak to be useful (< 0.52 is essentially noise).
+    if meta_head is not None:
+        try:
+            from omni.modeling.meta_label import apply_meta
+            m_model, m_result = meta_head
+            if m_result.auc_oof and m_result.auc_oof >= 0.52:
+                # Build the meta feature row matching the trained schema.
+                primary_dir = 1.0 if proba > 0.5 else -1.0
+                meta_row = {
+                    "primary_p": proba,
+                    "primary_conviction": abs(proba - 0.5) * 200.0,
+                    "primary_dir": primary_dir,
+                }
+                # Add risk-state cols (apply_meta will reindex to the trained order)
+                for c in ("rsi_14", "atr_pct_14", "vol_ratio",
+                          "dist_from_52w_high", "dist_from_52w_low",
+                          "macd_hist_pct", "ret_5d", "ret_20d"):
+                    if c in feat_only.columns:
+                        v = feat_only[c].iloc[0]
+                        meta_row[c] = float(v) if pd.notna(v) else 0.0
+                meta_df = pd.DataFrame([meta_row])
+                meta_p = float(apply_meta(m_model, meta_df, m_result.feature_cols)[0])
+                # Shrink raw proba toward 0.5 by meta confidence.
+                shrunk = 0.5 + (proba - 0.5) * meta_p
+                log.debug(
+                    f"meta shrink: raw={proba:.3f} meta_p={meta_p:.3f} "
+                    f"-> shrunk={shrunk:.3f}"
+                )
+                proba = shrunk
+                kind += f"+meta(p={meta_p:.2f})"
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"meta-labelling apply failed: {exc}")
 
     return proba, kind
 
@@ -657,9 +720,10 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                        if c not in _DROP_ALWAYS and not is_target_col(c)]]
     feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
 
-    universal, stack_rec, _conformal, circuit_model = _cached_models(_model_version_tag())
+    universal, stack_rec, _conformal, circuit_model, meta_head = _cached_models(_model_version_tag())
     proba, kind = _score_one(feat_only, universal=universal,
-                              stack_rec=stack_rec, asset_class=asset_class)
+                              stack_rec=stack_rec, asset_class=asset_class,
+                              meta_head=meta_head)
 
     # Multi-horizon predictions reuse the same feat_only frame.
     per_horizon: dict[int, float] = {5: proba}
