@@ -38,11 +38,18 @@ Docs:
    relative-strength, insider, earnings-momentum). Every pillar degrades
    to neutral 50 when its input is missing, so the system stays robust
    across asset classes.
-6. Emits **confidence-gated** signals only when conviction >= configured
-   threshold AND the regime supports the direction.
-7. Renders a Streamlit dashboard with explanations from a multi-LLM router
-   (FinBERT for sentiment, OpenRouter / Ollama / Cortex for natural-language
-   reasoning) backed by a Qdrant-powered RAG layer.
+6. Emits signals through a **soft regime-direction gate**: counter-trend
+   calls (e.g. shorts in a bull regime) get a conviction multiplier
+   instead of being hard-blocked, with per-(asset_class, regime)
+   `min_conviction` overrides. Set `gating.soft_regime: false` in
+   `config/rubric.yaml` to restore the legacy binary block.
+7. Surfaces results through a Streamlit dashboard featuring a plain-English
+   verdict banner ("Strongly Bearish", "Cautious Bearish — model leans
+   bearish but conviction below gate", "Sit Out", etc.) on top of every
+   prediction card, plus a `warn` tone when the rubric pillars and the
+   quant model disagree on direction. Explanations come from a multi-LLM
+   router (FinBERT for sentiment, OpenRouter / Ollama / Cortex for
+   natural-language reasoning) backed by a Qdrant-powered RAG layer.
 
 ## 9-pillar rubric
 
@@ -184,10 +191,20 @@ All behavioral knobs live in `config/*.yaml`:
 |-------------------|-------------------------------------------------------------|
 | `universe.yaml`   | Tickers, suffixes, lookback years, macro reference series   |
 | `sources.yaml`    | API keys (by env name), RSS feeds, FRED series list         |
-| `rubric.yaml`     | 9-pillar weights per regime + conviction gate threshold     |
+| `rubric.yaml`     | 9-pillar weights per regime + conviction gate threshold + soft-gate multiplier + per-(asset_class, regime) `min_conviction_overrides` |
 | `llm_routes.yaml` | Backends, rate limits, primary -> fallback chains, RAG opts |
 
 Edit YAML, restart — no code changes required for routing/weighting tweaks.
+
+### Phase-25 opt-in env flags
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `OMNI_CAL_METHOD` | `isotonic` | Set to `beta` to use Kull-Filho-Flach beta calibration in walk-forward training |
+| `OMNI_REGIME_STACKS` | unset | Set to `1` to load `data/models/regime_stacks_h5.joblib` and route inference by HMM `proba_today` |
+| `OMNI_LEARNED_RUBRIC` | unset | Set to `1` to blend YAML rubric weights with the learned posterior (`data/models/learned_rubric_weights.json`) |
+| `OMNI_LEARNED_RUBRIC_ALPHA` | `0.5` | Learned-prior blend weight (0 = pure YAML, 1 = pure learned) |
+| `OMNI_DEV_PASSWORD` | unset | Required to unlock the dashboard's developer tab (subprocess buttons for retrain / refit / drift monitor) |
 
 ## License & scope
 

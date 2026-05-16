@@ -149,11 +149,27 @@ to 1.0. **Every pillar degrades to neutral 50** when its input is missing,
 so the system stays robust across asset classes — crypto skips
 fundamental/insider/earnings entirely; non-NSE-F&O names skip OI.
 Backwards-compat: `score_row` uses `weights.get(name, 0.0)` so older
-configs (4/5/6-pillar) still load unchanged.
+configs (4/5/6-pillar) still load unchanged. Phase 25 adds
+`omni.ondemand.altdata_patch` so the live prediction row gets
+`insider_net_z_20d`, `fii_dii_net_z_20d`, and `block_deal_net_value_cr`
+populated from live SEBI PIT-2015 / NSE FII-DII / NSE block-deal pulls
+instead of falling through to neutral 50; missing live data still
+degrades gracefully.
 
-### `omni.ensemble` (Phase 6)
+### `omni.ensemble` (Phase 6, soft-gate Phase 25)
 Combines model probability with rubric score; applies the conviction gate
-(`min_conviction: 70`) and regime-supportive direction filter.
+and the regime-direction filter. Phase 25 made two changes:
+
+- The regime filter is now a *soft multiplier* (`gating.soft_regime: true`
+  in `config/rubric.yaml`) instead of a binary block — counter-trend
+  signals can still emerge if conviction is high enough. Set
+  `soft_regime: false` to restore the legacy binary block for backtest
+  reproducibility.
+- `min_conviction` can be overridden per `(asset_class, regime)` via
+  `gating.min_conviction_overrides` so crypto/fx and crisis regimes get
+  their own floors. The output frame carries an `effective_conviction`
+  column reflecting the post-multiplier value used for the threshold
+  check.
 
 ### `omni.backtest` (Phase 7)
 Walk-forward harness with leakage assertions, calibration plots, and a
@@ -455,3 +471,127 @@ stage; the gate then enforces selectivity.
   raw tier records which source produced which row.
 - Indian fundamentals from yfinance are sparser than US -- expect more NaNs
   in the fundamental pillar for NSE tickers.
+
+## Phase 25 — empirically-driven model + UX improvements
+
+This phase landed nine commits motivated by the May 8 2026 CIANAGRO crash
+backtest, in which the quant model correctly turned bearish on every name
+in the test basket but every signal was structurally blocked by either
+the regime gate or the conviction threshold. Each commit ships behind an
+opt-in env flag where applicable so production behaviour stays unchanged
+unless explicitly enabled.
+
+| Layer | Change | Module / file |
+|-------|--------|---------------|
+| ondemand | Live insider z, FII/DII z, block-deal patch on the prediction row | `omni/ondemand/altdata_patch.py` |
+| training | Per-horizon recency half-life (`{1: 1.5y, 5: 3.0y, 21: 5.0y}`) | `scripts/train_universal_model.py` |
+| calibration | Beta calibration as opt-in (`OMNI_CAL_METHOD=beta`) | `omni/calibration/{beta_cal,factory}.py` |
+| features | Difference-encoded technicals + lagged realised labels | `omni/features/diff_lagged.py` |
+| models | Regime-conditional stack bundle (`OMNI_REGIME_STACKS=1`) | `omni/models/regime_stack.py` |
+| ui | Plain-English verdict banner on prediction cards | `omni/dashboard/verdict.py` |
+| gate | Soft regime multiplier + per-(asset_class, regime) min_conviction | `omni/ensemble/gate.py` |
+| storage | Point-in-time fundamentals snapshots for replay reproducibility | `omni/storage/fundamentals_snapshots.py` |
+| features | Triple-barrier as default `--target` + India circuit-bar label masking | `omni/features/circuit.py`, `scripts/train_universal_model.py` |
+| rubric | Learned per-regime weights via opt-in `OMNI_LEARNED_RUBRIC=1` | `omni/rubric/learned.py` |
+| monitoring | PSI drift monitor + daily script | `omni/monitoring/drift.py`, `scripts/monitor_drift.py` |
+| dev-tab | Repaired Refit-regime + Run-daily-orchestrator buttons | `scripts/refit_regime.py`, `scripts/run_daily.py` |
+| perf | Vectorized `score_frame` and `gate.apply`; dropped `df.copy()` in scorer | `omni/rubric/scorer.py`, `omni/ensemble/gate.py` |
+
+### Soft regime gate (`omni.ensemble.gate`)
+
+The legacy hard regime block (longs only in bull/chop, shorts only in
+bear/crisis) was replaced with a multiplicative penalty applied to
+conviction *before* the threshold check:
+
+```
+direction \\ regime  bull  chop  bear  crisis
+long  (+1)           1.00  0.90  0.50  0.30
+short (-1)           0.50  0.90  1.00  0.80
+```
+
+Set `gating.soft_regime: false` in `config/rubric.yaml` to restore the
+legacy binary block for backtest reproducibility. Per-row threshold is
+also resolved from `gating.min_conviction_overrides` keyed by
+`(asset_class, regime)` so crypto floors are higher than equity floors,
+crisis tightens everything, etc. The output frame now carries an
+`effective_conviction` column for auditability.
+
+### Triple-barrier + India circuit-bar masking
+
+`scripts/train_universal_model.py` now defaults to `--target tb`; when
+`tb_label_<H>d` columns are missing the trainer logs a warning and
+falls back to `fwd_dir` (no hard failure). `omni.features.circuit`
+detects bars where `open == high == low == close` AND `|daily_ret|`
+matches a +/-5/10/20% band, and `mask_circuit_labels` NaNs out
+`fwd_dir_<H>d` / `tb_label_<H>d` on those source rows so they're
+dropped from training via `dropna(subset=[target])`. Verified on real
+CIANAGRO data: 16/59 bars correctly flagged across the parabolic +
+crash sequence.
+
+### Plain-English verdict banner
+
+`omni.dashboard.verdict.verdict(card_dict)` returns a 4-field
+`Verdict(headline, summary, disagreement, tone)` consumed by both the
+`signal_card` (Top-signals grid) and `detail_card`. Tone drives the
+banner colour:
+
+| Headline | Tone | When |
+|----------|------|------|
+| Strongly Bullish | long  | proba >= 0.65 AND conv >= 30 |
+| Strongly Bearish | short | proba <= 0.35 AND conv >= 30 |
+| Cautious Bullish/Bearish | long/short | softer proba or low conv |
+| Sit Out | flat | conv < 8 |
+| (any) | warn | rubric and quant disagree on direction AND gate blocked |
+
+The disagreement string is the trader-facing version of "model is
+bearish but the rubric pillars look constructive — late-cycle warning",
+generated from the strongest constructive pillars when the quant
+disagrees with the rubric lean.
+
+### PSI drift monitor
+
+`omni/monitoring/drift.py` computes Population Stability Index per
+feature with the conventional severity buckets (PSI < 0.10 ok, < 0.25
+watch, >= 0.25 alarm). `scripts/monitor_drift.py` is the daily driver:
+
+  - Baseline = older slice of training set, current = latest N business
+    days (prediction snapshots if their schema overlaps, otherwise tail
+    slice of training).
+  - `--save` writes `data/monitoring/drift_<date>.parquet`.
+  - First run on the current training set surfaced 22/110 features in
+    alarm — top drifters are quarterly fundamentals coverage gaps and
+    `amihud_illiq_20d` (real liquidity shift).
+
+### Performance
+
+Two hot-path optimizations validated by benchmarks:
+
+  - `omni.rubric.scorer.score_frame` — replaced `df.iterrows()` +
+    full-frame `df.copy()` with `df.to_dict("records")` + pre-allocated
+    np arrays + a single `df.assign(...)` at the end. Bench:
+    **17.9k rows/s** on 5000 random rows. Saves ~200 MB on the 700k-row
+    pooled training frame.
+  - `omni.ensemble.gate.apply` — vectorized the (regime, direction)
+    multiplier and the per-row threshold lookup via flat tuple-keyed
+    dicts; replaced O(n) Python method calls with O(n) C dict.get.
+  - `omni.rubric.scorer` module init — hoisted the
+    `omni.rubric.learned` import out of `score_row` so the per-call
+    sys.modules dict lookup goes away on training-set sweeps.
+
+### Anti-leakage refresh
+
+The lagged-realised-label features are deliberately constructed with a
+shift of `(horizon + 1)` trading days so the label's realisation
+window has closed strictly before today's row date. The diagnostic
+script (`scripts/diagnose_diff_features.py`) confirmed uniformly
+positive AUC lift across h ∈ {1, 5, 21}.
+
+### Env flags introduced this phase
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `OMNI_CAL_METHOD` | `isotonic` | `beta` opts into Kull-Filho-Flach beta calibration in walk-forward training |
+| `OMNI_REGIME_STACKS` | unset | `1` loads `data/models/regime_stacks_h5.joblib` and routes inference by HMM proba_today |
+| `OMNI_LEARNED_RUBRIC` | unset | `1` blends YAML rubric weights with the learned posterior at score time |
+| `OMNI_LEARNED_RUBRIC_ALPHA` | `0.5` | Learned-prior blend weight (0 = pure YAML, 1 = pure learned) |
+
