@@ -395,6 +395,14 @@ def _build_card(
                     feat_row["oi_total_lakhs"] = float(oi_data.get("oi_total_lakhs", 0))
         except Exception as exc:  # noqa: BLE001
             log.debug(f"OI augmentation skipped for {bundle.ticker}: {exc}")
+        # Phase 25 — patch insider z, FII/DII z, block-deal net value
+        # so the rubric's `insider` and microstructure pillars get real
+        # data on the live row instead of falling back to neutral 50.
+        try:
+            from omni.ondemand.altdata_patch import patch_altdata
+            feat_row = patch_altdata(feat_row, bundle.ticker, asset_class="india")
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"altdata patch skipped for {bundle.ticker}: {exc}")
     from omni.rubric.scorer import score_row
     rub = score_row(feat_row, regime=regime_label, asset_class=bundle.asset_class)
     pillars = {
