@@ -208,5 +208,4 @@ Edit YAML, restart — no code changes required for routing/weighting tweaks.
 
 ## License & scope
 
-Personal research project. Not investment advice. Free-tier APIs only;
-paid services (Cortex) used selectively.
+Personal research project. Not investment advice. Free-tier APIs only.
