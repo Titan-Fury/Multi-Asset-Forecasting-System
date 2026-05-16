@@ -530,6 +530,25 @@ def score_row(row: pd.Series, *, regime: str, asset_class: str,
               cfg: dict | None = None) -> RubricResult:
     cfg = cfg or _load_rubric()
     weights = cfg["regimes"].get(regime, cfg["regimes"]["chop"])["weights"]
+
+    # Phase 25 / Item 5: optional learned rubric weights. When the JSON
+    # file `data/models/learned_rubric_weights.json` exists AND the env
+    # flag `OMNI_LEARNED_RUBRIC=1` is set, blend the YAML prior with the
+    # data-fit posterior 50/50 (or per-env override). This recovers the
+    # actually-predictive pillar contributions per regime instead of
+    # relying on the hand-tuned weights alone.
+    try:
+        import os as _os
+        if _os.environ.get("OMNI_LEARNED_RUBRIC", "").strip() == "1":
+            from omni.rubric.learned import load_learned_weights, blend_weights
+            learned = load_learned_weights()
+            if learned and regime in learned:
+                alpha = float(_os.environ.get("OMNI_LEARNED_RUBRIC_ALPHA", "0.5"))
+                weights = blend_weights(weights, learned[regime], alpha=alpha)
+    except Exception as _exc:  # noqa: BLE001
+        # Never let the learned-rubric path break scoring
+        pass
+
     gating = cfg.get("gating", {})
     min_conv = float(gating.get("min_conviction", 70.0))
 
