@@ -223,18 +223,41 @@ def _cached_models(mv_tag: str):
                     )
     except Exception as e:  # noqa: BLE001
         log.debug(f"meta-labelling load skipped: {e}")
+    # Phase 25 / Commit E — regime-conditional stack bundle. Opt-in via
+    # OMNI_REGIME_STACKS=1; otherwise None and the existing single-stack
+    # path is used.
+    regime_stacks = None
+    try:
+        import os as _os
+        if _os.environ.get("OMNI_REGIME_STACKS", "").strip() == "1":
+            from omni.models.regime_stack import RegimeStackBundle, default_path
+            rs_path = default_path(5)
+            regime_stacks = RegimeStackBundle.load(rs_path)
+            if regime_stacks is not None:
+                log.info(
+                    f"regime_stacks loaded: regimes={list(regime_stacks.stacks.keys())} "
+                    f"aucs={regime_stacks.oof_aucs}"
+                )
+            else:
+                log.info(f"regime_stacks: OMNI_REGIME_STACKS=1 but no bundle at {rs_path}")
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"regime_stacks load skipped: {e}")
+
     # Back-compat: callers previously expected a single `meta_head`. Expose
     # the h=5 head under that name when present.
     meta_head = meta_heads.get(5)
     _MODEL_CACHE.clear()
     _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model,
-                              meta_head, meta_heads)
+                              meta_head, meta_heads, regime_stacks)
     return _MODEL_CACHE[mv_tag]
 
 
 def _score_one(feat_only: pd.DataFrame,
                *, universal, stack_rec, asset_class: str,
                meta_head=None,
+               regime_stacks=None,
+               regime_proba: dict[str, float] | None = None,
+               regime_label: str | None = None,
                ) -> tuple[float, str]:
     """Score a single live-row feature vector through universal/stack/specialist.
 
@@ -267,6 +290,30 @@ def _score_one(feat_only: pd.DataFrame,
                 kind = "stack_h5_rank_purged"
         except Exception as exc:  # noqa: BLE001
             log.warning(f"stack score failed: {exc}")
+
+    # Phase 25 / Commit E — regime-conditional stack routing. When the
+    # bundle is loaded (OMNI_REGIME_STACKS=1) and any sub-stack has a
+    # better OOF AUC than what we picked above, blend predictions by
+    # the HMM's per-state posterior and use that as the new score.
+    if regime_stacks is not None:
+        try:
+            best_rs_auc = max(regime_stacks.oof_aucs.values()) if regime_stacks.oof_aucs else 0.0
+            uni_auc = float(universal.oof_auc or 0.5) if universal is not None else 0.5
+            existing = float(stack_rec.oof_meta_auc) if stack_rec is not None else uni_auc
+            if best_rs_auc > existing:
+                Xrs = feat_only.reindex(columns=regime_stacks.feature_cols)
+                p_rs = float(regime_stacks.predict_proba(
+                    Xrs, regime_proba=regime_proba, regime_label=regime_label,
+                )[0])
+                proba = p_rs
+                # Encode which regime weights actually contributed
+                if regime_proba:
+                    top = max(regime_proba.items(), key=lambda kv: kv[1])[0]
+                    kind = f"regime_stack[{top}]"
+                else:
+                    kind = f"regime_stack[{regime_label or 'uniform'}]"
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"regime_stacks score failed: {exc}")
 
     # India specialist (lazy load — cheap; cached by specialists module)
     if asset_class == "india":
@@ -738,10 +785,19 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
                        if c not in _DROP_ALWAYS and not is_target_col(c)]]
     feat_only = feat_only.apply(pd.to_numeric, errors="coerce")
 
-    universal, stack_rec, _conformal, circuit_model, meta_head, meta_heads = _cached_models(_model_version_tag())
+    universal, stack_rec, _conformal, circuit_model, meta_head, meta_heads, regime_stacks = _cached_models(_model_version_tag())
+    # Phase 25 / Commit E — surface regime posterior to the scorer so the
+    # regime-conditional stack bundle can route by per-state weights.
+    regime_proba = (bundle.regime.proba_today
+                     if bundle.regime is not None else None)
+    regime_label = (bundle.regime.label_today
+                     if bundle.regime is not None else None)
     proba, kind = _score_one(feat_only, universal=universal,
                               stack_rec=stack_rec, asset_class=asset_class,
-                              meta_head=meta_head)
+                              meta_head=meta_head,
+                              regime_stacks=regime_stacks,
+                              regime_proba=regime_proba,
+                              regime_label=regime_label)
 
     # Multi-horizon predictions reuse the same feat_only frame.
     # h=5 already has meta-shrinkage applied via _score_one above.
