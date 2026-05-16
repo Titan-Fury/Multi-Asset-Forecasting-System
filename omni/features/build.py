@@ -137,6 +137,16 @@ def build_for_ticker(asset_class: str, ticker: str,
     tg["date"] = pd.to_datetime(tg["date"])
     out = out.merge(tg, on="date", how="left")
 
+    # Phase 25 / Commit D — difference encoding + lagged realised labels.
+    # Must run AFTER targets are joined so `lag_real_fwd_dir_<h>d` can
+    # read fwd_dir_*. Shift is (h+1) trading days so the realisation
+    # window has closed strictly before today's row date.
+    try:
+        from omni.features.diff_lagged import add_diff_and_lagged
+        out = add_diff_and_lagged(out, horizons=horizons)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"diff_lagged compute skipped for {ticker}: {e}")
+
     if persist:
         tiers.save_features(out, asset_class=asset_class, ticker=ticker)
         log.info(f"features {asset_class}/{ticker}: rows={len(out)} cols={out.shape[1]}")
