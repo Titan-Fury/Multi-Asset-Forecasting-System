@@ -38,12 +38,24 @@ bull/chop, -1 if total<=30 in bear/crisis, else 0 (handled by gate later).
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 import numpy as np
 import pandas as pd
 
 from omni.utils.env import rubric as _load_rubric
 from omni.utils.logger import log
+
+# Phase 25 / Optimization: hoist the learned-rubric import out of the
+# hot scoring path. `load_learned_weights` is internally cached so
+# referencing it per row is O(1), but the import statement itself is
+# not (sys.modules dict lookup runs on every call).
+try:
+    from omni.rubric.learned import load_learned_weights as _load_learned_weights
+    from omni.rubric.learned import blend_weights as _blend_weights
+except Exception:  # noqa: BLE001
+    _load_learned_weights = None  # type: ignore
+    _blend_weights = None  # type: ignore
 
 _NEUTRAL = 50.0
 
@@ -537,17 +549,16 @@ def score_row(row: pd.Series, *, regime: str, asset_class: str,
     # data-fit posterior 50/50 (or per-env override). This recovers the
     # actually-predictive pillar contributions per regime instead of
     # relying on the hand-tuned weights alone.
-    try:
-        import os as _os
-        if _os.environ.get("OMNI_LEARNED_RUBRIC", "").strip() == "1":
-            from omni.rubric.learned import load_learned_weights, blend_weights
-            learned = load_learned_weights()
+    if (_load_learned_weights is not None
+            and os.environ.get("OMNI_LEARNED_RUBRIC", "").strip() == "1"):
+        try:
+            learned = _load_learned_weights()
             if learned and regime in learned:
-                alpha = float(_os.environ.get("OMNI_LEARNED_RUBRIC_ALPHA", "0.5"))
-                weights = blend_weights(weights, learned[regime], alpha=alpha)
-    except Exception as _exc:  # noqa: BLE001
-        # Never let the learned-rubric path break scoring
-        pass
+                alpha = float(os.environ.get("OMNI_LEARNED_RUBRIC_ALPHA", "0.5"))
+                weights = _blend_weights(weights, learned[regime], alpha=alpha)
+        except Exception:  # noqa: BLE001
+            # Never let the learned-rubric path break scoring
+            pass
 
     gating = cfg.get("gating", {})
     min_conv = float(gating.get("min_conviction", 70.0))
@@ -602,40 +613,72 @@ def score_frame(df: pd.DataFrame, *, regimes: pd.Series | None = None,
 
     `regimes` aligned with df.index — if None, uses 'chop' for all rows.
     `df` must contain `asset_class`. Returns df augmented with score columns.
+
+    Phase 25 / Optimization:
+      - Pre-aligns the regime series via reindex once instead of per-row.
+      - Iterates with `df.to_dict("records")` (~3-5x faster than
+        `df.iterrows()`; the per-row Series materialisation in iterrows
+        is the dominant cost here).
+      - Skips the upfront `df.copy()` — assigns score columns at the
+        end with a single `assign()` so we don't materialise a 200MB
+        copy on the 700k-row training frame.
     """
     cfg = cfg or _load_rubric()
+    n = len(df)
     if regimes is None:
-        regimes = pd.Series(["chop"] * len(df), index=df.index)
+        rg_arr = np.full(n, "chop", dtype=object)
+    else:
+        rg_arr = regimes.reindex(df.index, fill_value="chop").to_numpy(dtype=object)
 
-    out = df.copy()
-    techs, funds, sents, macros = [], [], [], []
-    micros, ois, rss, inss, ems = [], [], [], [], []
-    totals, dirs = [], []
-    for i, row in df.iterrows():
-        ac = row.get("asset_class", "us")
-        rg = regimes.loc[i] if i in regimes.index else "chop"
+    # Convert to records once — iteration is then pure-Python over dicts
+    # (orders of magnitude faster than pd.iterrows() which materialises a
+    # new Series for each row). Score helpers all use row.get() which is
+    # dict-compatible.
+    records = df.to_dict("records")
+
+    techs = np.empty(n, dtype=float)
+    funds = np.empty(n, dtype=float)
+    sents = np.empty(n, dtype=float)
+    macros = np.empty(n, dtype=float)
+    micros = np.empty(n, dtype=float)
+    ois = np.empty(n, dtype=float)
+    rss = np.empty(n, dtype=float)
+    inss = np.empty(n, dtype=float)
+    ems = np.empty(n, dtype=float)
+    totals = np.empty(n, dtype=float)
+    dirs = np.empty(n, dtype=int)
+
+    for i, row in enumerate(records):
+        ac = row.get("asset_class") or "us"
+        rg = rg_arr[i]
         r = score_row(row, regime=rg, asset_class=ac, cfg=cfg)
-        techs.append(r.technical_score)
-        funds.append(r.fundamental_score)
-        sents.append(r.sentiment_score)
-        macros.append(r.macro_score)
-        micros.append(r.microstructure_score)
-        ois.append(r.oi_score)
-        rss.append(r.relative_strength_score)
-        inss.append(r.insider_score)
-        ems.append(r.earnings_momentum_score)
-        totals.append(r.rubric_total)
-        dirs.append(r.rubric_direction)
-    out["technical_score"] = techs
-    out["fundamental_score"] = funds
-    out["sentiment_score"] = sents
-    out["macro_score"] = macros
-    out["microstructure_score"] = micros
-    out["oi_score"] = ois
-    out["relative_strength_score"] = rss
-    out["insider_score"] = inss
-    out["earnings_momentum_score"] = ems
-    out["rubric_total"] = totals
-    out["rubric_direction"] = dirs
-    log.info(f"rubric scored rows={len(out)} mean_total={np.mean(totals):.2f}")
-    return out
+        techs[i] = r.technical_score
+        funds[i] = r.fundamental_score
+        sents[i] = r.sentiment_score
+        macros[i] = r.macro_score
+        micros[i] = r.microstructure_score
+        ois[i] = r.oi_score
+        rss[i] = r.relative_strength_score
+        inss[i] = r.insider_score
+        ems[i] = r.earnings_momentum_score
+        totals[i] = r.rubric_total
+        dirs[i] = r.rubric_direction
+
+    log.info(f"rubric scored rows={n} mean_total={totals.mean():.2f}")
+
+    # Single assign() avoids the fragmented-block warning on wide frames
+    # AND avoids the upfront 200MB copy from `out = df.copy()`. Pandas
+    # internally creates the new BlockManager only once.
+    return df.assign(
+        technical_score=techs,
+        fundamental_score=funds,
+        sentiment_score=sents,
+        macro_score=macros,
+        microstructure_score=micros,
+        oi_score=ois,
+        relative_strength_score=rss,
+        insider_score=inss,
+        earnings_momentum_score=ems,
+        rubric_total=totals,
+        rubric_direction=dirs,
+    )

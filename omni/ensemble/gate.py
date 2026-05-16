@@ -125,10 +125,13 @@ def apply(df: pd.DataFrame, *, cfg: GateConfig | None = None,
     if cfg.require_regime_supportive and regime_col in out.columns:
         rg = out[regime_col].astype(str).str.lower()
         if cfg.soft_regime:
+            # Phase 25 / Optimization: vectorize the (regime, direction)
+            # lookup via pd.Series.map() over a tuple-keyed dict instead
+            # of looping with regime_dir_multiplier per row.
+            keys = list(zip(rg, out["direction"].astype(int)))
             mult = pd.Series(
-                [regime_dir_multiplier(r, int(d))
-                 for r, d in zip(rg, out["direction"].astype(int))],
-                index=out.index,
+                [_REGIME_DIR_MULT_DEFAULT.get(k, 1.0) for k in keys],
+                index=out.index, dtype=float,
             )
         else:
             # Legacy hard binary block — kept for backtest reproducibility.
@@ -145,15 +148,22 @@ def apply(df: pd.DataFrame, *, cfg: GateConfig | None = None,
 
     # Per-row min_conviction threshold (Phase 25 / Item 2). Falls back to
     # the global cfg.min_conviction when no asset_class/regime override
-    # matches.
+    # matches. Vectorized via a flat tuple-keyed map so this is O(n)
+    # in C dict lookups instead of O(n) Python method calls.
     if cfg.min_conviction_overrides and "asset_class" in out.columns:
+        flat: dict[tuple[str, str], float] = {}
+        for ac_k, rg_map in cfg.min_conviction_overrides.items():
+            if isinstance(rg_map, dict):
+                for rg_k, val in rg_map.items():
+                    flat[(str(ac_k).lower(), str(rg_k).lower())] = float(val)
+        ac_lower = out["asset_class"].astype(str).str.lower()
+        rg_lower = (out[regime_col].astype(str).str.lower()
+                    if regime_col in out.columns
+                    else pd.Series([""] * len(out), index=out.index))
+        keys = list(zip(ac_lower, rg_lower))
         thresholds = pd.Series(
-            [cfg.threshold_for(ac, rg) for ac, rg in zip(
-                out["asset_class"].astype(str),
-                out[regime_col].astype(str) if regime_col in out.columns
-                    else [""] * len(out),
-            )],
-            index=out.index,
+            [flat.get(k, float(cfg.min_conviction)) for k in keys],
+            index=out.index, dtype=float,
         )
     else:
         thresholds = pd.Series(float(cfg.min_conviction), index=out.index)
