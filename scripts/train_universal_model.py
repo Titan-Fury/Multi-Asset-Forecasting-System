@@ -137,10 +137,23 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
         # to 0.602 — the single biggest target-redesign win in the project.
         tb_col = f"tb_label_{horizon}d"
         if tb_col not in sub.columns:
-            return {"horizon": horizon, "skipped": True,
-                    "reason": f"{tb_col} missing — run scripts/augment_triple_barrier.py first"}
-        sub = sub.dropna(subset=[tb_col])
-        y = (sub[tb_col].astype(int) == 1).astype(int).to_numpy()
+            # Phase 25 / Item 4: graceful fallback when tb columns are
+            # missing. tb is now the default --target so we must not
+            # hard-fail when callers haven't run augment_triple_barrier
+            # yet — just log a warning and use fwd_dir.
+            log.warning(
+                f"[h={horizon}] tb_label missing; falling back to fwd_dir "
+                f"(run scripts/augment_triple_barrier.py to use TB labels)"
+            )
+            target = f"fwd_dir_{horizon}d"
+            if target not in sub.columns:
+                return {"horizon": horizon, "skipped": True,
+                        "reason": "no target column (tb_label and fwd_dir both missing)"}
+            sub = sub.dropna(subset=[target])
+            y = (sub[target].astype(int) > 0).astype(int).to_numpy()
+        else:
+            sub = sub.dropna(subset=[tb_col])
+            y = (sub[tb_col].astype(int) == 1).astype(int).to_numpy()
     else:
         target = f"fwd_dir_{horizon}d"
         if target not in sub.columns:
@@ -312,15 +325,19 @@ def main() -> int:
                           choices=("single", "stack"),
                           help="single = current XGB+isotonic. stack = XGB+HGB(+LGBM+CB) "
                                 "+ logistic meta on PURGED-kfold OOF preds.")
-    parser.add_argument("--target", default="dir",
+    parser.add_argument("--target", default="tb",
                           choices=("dir", "rank", "tb"),
                           help="dir = binary fwd_dir_<H>d. rank = cross-sectional "
                                 "percentile rank of fwd_ret (Numerai-style); "
                                 "binarised at 0.5 for the classifier head. "
                                 "tb = triple-barrier (de Prado): label=1 iff price "
-                                "hits +2σ before -1σ within the horizon. Requires "
-                                "scripts/augment_triple_barrier.py first. Empirically "
-                                "lifts OOF AUC ~0.09 vs dir on the same features.")
+                                "hits +2-sigma before -1-sigma within the horizon. "
+                                "Phase 25 / Item 4: tb is now the default because it "
+                                "lifts h=5 OOF AUC ~0.09 vs dir on the same features. "
+                                "If tb_label_<H>d columns are missing, the trainer "
+                                "automatically falls back to dir with a warning. "
+                                "Run scripts/augment_triple_barrier.py to add tb columns "
+                                "to an existing training set.")
     parser.add_argument("--cv", default="walkforward",
                           choices=("walkforward", "purged"),
                           help="purged = de-Prado purged K-fold + embargo (leakage-free)")

@@ -137,6 +137,17 @@ def build_for_ticker(asset_class: str, ticker: str,
     tg["date"] = pd.to_datetime(tg["date"])
     out = out.merge(tg, on="date", how="left")
 
+    # Phase 25 / Item 4: circuit-bar label masking. India circuits cap
+    # daily moves at +/-5% / +/-10% / +/-20% — bars that locked at
+    # circuit are NOT real price discovery. Setting their fwd_dir_<H>d
+    # to NaN drops them from training via dropna(subset=[target]).
+    try:
+        from omni.features.circuit import mask_circuit_labels
+        out = mask_circuit_labels(out, horizons=horizons,
+                                    asset_class=asset_class)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"circuit-mask skipped for {ticker}: {e}")
+
     # Phase 25 / Commit D — difference encoding + lagged realised labels.
     # Must run AFTER targets are joined so `lag_real_fwd_dir_<h>d` can
     # read fwd_dir_*. Shift is (h+1) trading days so the realisation
