@@ -197,6 +197,38 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
     }
 
 
+def _parse_half_life(spec: str) -> dict[int, float] | float:
+    """Parse the --half-life-years value into either a float (uniform across
+    horizons, legacy) or a {horizon: half_life_years} dict.
+
+    Per-horizon half-life is the principled choice: a 1-day fwd_dir label
+    is mostly explained by the *current* market regime, so a 5y half-life
+    dilutes the recent signal. A 21-day label is broader and benefits from
+    a longer recall. Default mapping {1: 1.5, 5: 3.0, 21: 5.0} encodes that.
+    """
+    if "," in spec or ":" in spec:
+        out: dict[int, float] = {}
+        for tok in spec.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            h_s, y_s = tok.split(":")
+            out[int(h_s)] = float(y_s)
+        return out
+    return float(spec)
+
+
+def _half_life_for(spec: dict[int, float] | float, horizon: int) -> float:
+    """Resolve effective half-life for one horizon, with safe default."""
+    if isinstance(spec, dict):
+        if horizon in spec:
+            return spec[horizon]
+        # Pick the closest known horizon by absolute distance
+        nearest = min(spec.keys(), key=lambda k: abs(k - horizon))
+        return spec[nearest]
+    return float(spec)
+
+
 def _train_one_horizon(df: pd.DataFrame, used: list[str], *,
                          horizon: int, n_folds: int, min_train: int,
                          half_life_years: float) -> dict:
@@ -265,8 +297,15 @@ def main() -> int:
     parser.add_argument("--horizons", default="5",
                           help="comma-separated horizons in trading days "
                                 "(e.g. '1,5,21' for full multi-horizon)")
-    parser.add_argument("--half-life-years", type=float, default=5.0,
-                          help="recency-weight half-life; smaller = more recency bias")
+    parser.add_argument("--half-life-years", type=str, default="1:1.5,5:3.0,21:5.0",
+                          help="recency-weight half-life. Either a single float "
+                               "(applied to every horizon) or a comma-separated "
+                               "'h:y' map (e.g. '1:1.5,5:3.0,21:5.0'). "
+                               "Short horizons get tighter half-lives — h=1 day "
+                               "labels are dominated by recent regime, so a 5y "
+                               "half-life dilutes the signal. Default is the "
+                               "per-horizon map; pass a single float for the "
+                               "legacy uniform behaviour.")
     parser.add_argument("--lake-only", action="store_true",
                           help="error if lake training set is missing")
     parser.add_argument("--ensemble", default="single",
@@ -303,6 +342,12 @@ def main() -> int:
     if invalid:
         print(f"ERROR: unsupported horizons {invalid}; valid: {_VALID_HORIZONS}")
         return 1
+
+    half_life_spec = _parse_half_life(args.half_life_years)
+    if isinstance(half_life_spec, dict):
+        print(f"  recency half-life per horizon: {half_life_spec}")
+    else:
+        print(f"  recency half-life (uniform): {half_life_spec}y")
 
     blob_5d, _ = model_registry._paths_for(5)
     if blob_5d.exists() and not args.force and horizons == [5]:
@@ -354,7 +399,7 @@ def main() -> int:
             r = _train_one_horizon(df, used, horizon=h,
                                       n_folds=args.n_folds,
                                       min_train=args.min_train,
-                                      half_life_years=args.half_life_years)
+                                      half_life_years=_half_life_for(half_life_spec, h))
         results.append(r)
         if r.get("skipped"):
             print(f"  h={h}: SKIPPED ({r.get('reason')})")
