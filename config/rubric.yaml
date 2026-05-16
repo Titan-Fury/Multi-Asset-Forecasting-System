@@ -98,4 +98,41 @@ regimes:
 # and toward 70 only at OOF AUC ~0.60+.
 gating:
   min_conviction: 15.0
-  require_regime_supportive: true   # only emit longs in bull/chop, shorts in bear/crisis
+  require_regime_supportive: true   # apply the regime-direction multiplier
+  # Phase 25 / Item 1: soft regime gate. When true, conviction is
+  # multiplied by a (regime, direction) factor before the threshold
+  # check, instead of being hard-blocked. The legacy binary block
+  # caused 7/7 correct bearish calls to be rejected on 2026-05-08
+  # (HMM was 0.999 confident bull at the literal local top). Set to
+  # false to restore legacy behaviour for backtest reproducibility.
+  soft_regime: true
+
+  # Phase 25 / Item 2: per-(asset_class, regime) min_conviction overrides.
+  # The gate threshold is looked up in this map first; when a key is
+  # missing the global `min_conviction` above is used.
+  #
+  # Higher floors = fewer signals but cleaner ones. Tune per slice:
+  #   - india smallcaps in bull/chop: noisier microstructure, raise the floor
+  #   - largecaps in bear: shorts work well, allow the lower floor
+  #   - any class in crisis: tighten because correlations -> 1
+  min_conviction_overrides:
+    india:
+      bull:   15.0
+      chop:   18.0   # range-bound -> require stronger conviction
+      bear:   12.0   # shorts work in bear -> ease the gate slightly
+      crisis: 25.0   # de-risk in crisis -> demand high conviction
+    us:
+      bull:   15.0
+      chop:   18.0
+      bear:   12.0
+      crisis: 25.0
+    crypto:
+      bull:   25.0   # 24x7 trading + higher noise -> higher floor across the board
+      chop:   30.0
+      bear:   20.0
+      crisis: 35.0
+    fx:
+      bull:   20.0
+      chop:   25.0
+      bear:   20.0
+      crisis: 30.0
