@@ -102,18 +102,42 @@ def _fundamentals_combined(asset_class: str, ticker: str) -> tuple[pd.DataFrame,
     if not fmp.empty:
         sources.append("fmp")
     if yf.empty and fmp.empty:
+        # Phase 25 / Item 3: no live data — fall back to the most recent
+        # PIT snapshot (replay-safe; uses what we previously persisted).
+        try:
+            from omni.storage.fundamentals_snapshots import load_pit
+            pit = load_pit(asset_class, ticker, asof=None)
+            if not pit.empty:
+                pit = pit.drop(columns=[c for c in ("snapshot_date",)
+                                         if c in pit.columns])
+                return pit, ["pit_snapshot"]
+        except Exception:  # noqa: BLE001
+            pass
         return pd.DataFrame(), []
     if yf.empty:
-        return fmp, sources
-    if fmp.empty:
-        return yf, sources
-    # Merge: FMP wins on conflicts where it has a non-null value.
-    merged = yf.iloc[0].to_dict()
-    for k, v in fmp.iloc[0].items():
-        if v is not None and not (isinstance(v, float) and np.isnan(v)):
-            merged[k] = v
-    merged["source"] = "yfinance+fmp"
-    return pd.DataFrame([merged]), sources
+        merged_df = fmp
+    elif fmp.empty:
+        merged_df = yf
+    else:
+        # Merge: FMP wins on conflicts where it has a non-null value.
+        merged = yf.iloc[0].to_dict()
+        for k, v in fmp.iloc[0].items():
+            if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                merged[k] = v
+        merged["source"] = "yfinance+fmp"
+        merged_df = pd.DataFrame([merged])
+
+    # Phase 25 / Item 3: persist this fetch as a dated PIT snapshot so
+    # replays can reproduce point-in-time fundamentals instead of
+    # silently using whatever yfinance returns today. Best-effort —
+    # write failures don't block the live path.
+    try:
+        from omni.storage.fundamentals_snapshots import snapshot_save
+        snapshot_save(asset_class, ticker, merged_df)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"fundamentals_pit snapshot skipped for {ticker}: {exc}")
+
+    return merged_df, sources
 
 
 # ---------- news: union + dedup + capped sentiment ----------
