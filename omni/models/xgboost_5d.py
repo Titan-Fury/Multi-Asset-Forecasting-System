@@ -168,11 +168,37 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         clf = XGBClassifier(**params)
         clf.fit(Xt.values, yt.values, verbose=False)
 
-        if _HAS_FROZEN:
-            cal = CalibratedClassifierCV(FrozenEstimator(clf), method="isotonic")
+        # Phase 25 — env-controlled calibration: OMNI_CAL_METHOD=beta opts
+        # into Kull-Filho-Flach beta calibration. Default (isotonic) keeps
+        # the existing CalibratedClassifierCV path so persisted models
+        # behave identically.
+        from omni.calibration.factory import get_method
+        if get_method() == "beta":
+            from omni.calibration.factory import fit_calibrator
+            raw_v = clf.predict_proba(Xv.values)[:, 1]
+            cal = fit_calibrator(raw_v, yv.values, method="beta")
+            # Wrap so .predict_proba(X) keeps the original 2-D shape.
+            # Build a small adapter that calls the underlying classifier
+            # for raw scores, then runs the calibrator on them.
+
+            class _BetaCalProxy:
+                __slots__ = ("clf", "cal")
+
+                def __init__(self, clf, cal):
+                    self.clf = clf
+                    self.cal = cal
+
+                def predict_proba(self, X):
+                    raw = self.clf.predict_proba(X)[:, 1]
+                    return self.cal.predict_proba(raw)
+
+            cal = _BetaCalProxy(clf, cal)
         else:
-            cal = CalibratedClassifierCV(clf, method="isotonic", cv="prefit")
-        cal.fit(Xv.values, yv.values)
+            if _HAS_FROZEN:
+                cal = CalibratedClassifierCV(FrozenEstimator(clf), method="isotonic")
+            else:
+                cal = CalibratedClassifierCV(clf, method="isotonic", cv="prefit")
+            cal.fit(Xv.values, yv.values)
 
         proba = cal.predict_proba(Xs.values)[:, 1]
         log.info(f"fold={k} train={len(inner_train)} val={len(inner_val)} "

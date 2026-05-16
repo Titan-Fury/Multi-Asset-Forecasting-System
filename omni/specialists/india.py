@@ -57,7 +57,6 @@ def _legacy_path() -> Path:
 
 def fit(df_full: pd.DataFrame, *, horizon: int = 5, n_folds: int = 5) -> IndiaSpecialist:
     """Train an India-specialist on the india slice of the training set."""
-    from sklearn.calibration import IsotonicRegression
     from sklearn.metrics import roc_auc_score
     from xgboost import XGBClassifier
 
@@ -116,8 +115,13 @@ def fit(df_full: pd.DataFrame, *, horizon: int = 5, n_folds: int = 5) -> IndiaSp
         eval_metric="auc", n_jobs=-1, verbosity=0,
     )
     final.fit(X_filled.to_numpy(dtype=float), y)
-    iso = IsotonicRegression(out_of_bounds="clip")
-    iso.fit(oof[mask], y[mask])
+    # Phase 25 — env-controlled calibration. Default isotonic; opt into
+    # Kull-Filho-Flach beta with OMNI_CAL_METHOD=beta.
+    from omni.calibration.factory import fit_calibrator, get_method
+    cal = fit_calibrator(oof[mask], y[mask].astype(int), method=get_method())
+    iso = cal  # name kept for downstream serialisation; CalibratorWrapper
+                # exposes both .predict and .predict_proba so existing callers
+                # using `self.calibrator.predict(raw)` keep working.
 
     spec = IndiaSpecialist(
         model=final, calibrator=iso, feature_cols=feat_cols,
