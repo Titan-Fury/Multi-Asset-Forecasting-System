@@ -316,6 +316,25 @@ def signal_card(row: pd.Series) -> None:
     """
     st.markdown(body, unsafe_allow_html=True)
 
+    # Phase 25 — plain-English verdict line directly under the card so the
+    # Top-signals grid is readable without expanding the detail view.
+    try:
+        from omni.dashboard.verdict import verdict as _verdict_fn
+        _v = _verdict_fn(row.to_dict() if hasattr(row, "to_dict") else dict(row))
+        _color = {
+            "long": "#16a34a", "short": "#dc2626",
+            "warn": "#d97706", "flat": "var(--text-muted)",
+        }.get(_v.tone, "var(--text-muted)")
+        st.markdown(
+            f"<div style='margin-top:6px;font-size:0.85rem;"
+            f"color:{_color};font-weight:600'>{_v.headline}</div>"
+            f"<div style='font-size:0.78rem;color:var(--text-secondary);"
+            f"line-height:1.35'>{_v.summary}</div>",
+            unsafe_allow_html=True,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     if not pdf.empty:
         try:
             colors = ["#06b6d4", "#8b5cf6", "#ec4899", "#22d3ee"]
@@ -608,6 +627,43 @@ def prediction_card(card_dict: dict) -> None:
     # ---- open the outer card ----
     st.markdown(f"<div class='card'>{header}<hr class='hairline'/>",
                 unsafe_allow_html=True)
+
+    # ---- plain-English verdict banner (Phase 25) ----
+    # Surfaces a 1-sentence trader-facing summary BEFORE the stat tiles,
+    # because direction=FLAT + conviction=12 is opaque without context.
+    # The CIANAGRO May 8 backtest (model bearish, rubric still bullish,
+    # gate blocked, realised h+5 = -22.6%) was the motivating case:
+    # without this banner that disagreement is invisible to the user.
+    try:
+        from omni.dashboard.verdict import verdict as _verdict_fn
+        _v = _verdict_fn(card_dict)
+        _tone_color = {
+            "long":  ("var(--positive)", "rgba(22,163,74,0.10)"),
+            "short": ("var(--negative)", "rgba(220,38,38,0.10)"),
+            "warn":  ("#d97706",         "rgba(217,119,6,0.10)"),
+            "flat":  ("var(--text-muted)", "var(--surface-2)"),
+        }.get(_v.tone, ("var(--text-muted)", "var(--surface-2)"))
+        _disagreement_html = (
+            f"<div style='margin-top:var(--space-2);font-size:var(--text-sm);"
+            f"color:var(--text-secondary);font-style:italic'>{_v.disagreement}</div>"
+            if _v.disagreement else ""
+        )
+        st.markdown(
+            f"<div style='margin:var(--space-3) 0 var(--space-4) 0;"
+            f"padding:var(--space-3) var(--space-4);"
+            f"background:{_tone_color[1]};border-left:3px solid {_tone_color[0]};"
+            f"border-radius:6px'>"
+            f"<div style='font-size:var(--text-lg);font-weight:700;"
+            f"color:{_tone_color[0]};letter-spacing:-0.01em'>{_v.headline}</div>"
+            f"<div style='font-size:var(--text-sm);color:var(--text-primary);"
+            f"margin-top:var(--space-1)'>{_v.summary}</div>"
+            f"{_disagreement_html}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    except Exception as _exc:  # noqa: BLE001
+        # Never let the verdict banner break the card render
+        pass
 
     # ---- section 2: results — 4 stat tiles ----
     st.markdown("<div class='section-label'>Results</div>", unsafe_allow_html=True)
