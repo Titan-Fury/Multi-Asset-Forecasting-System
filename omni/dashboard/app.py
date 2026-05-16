@@ -1028,21 +1028,23 @@ def _render_dev_tab() -> None:
     with cols[0]:
         if st.button("🔁 Refit regime (HMM)", use_container_width=True,
                      help="Re-run scripts/refit_regime.py — pulls latest macro data "
-                          "and refits the 4-state HMM. Updates 'Last regime point'."):
+                          "and refits the 4-state HMM. Updates data/regime/latest.parquet."):
             with st.spinner("running refit_regime…"):
                 try:
                     rc = subprocess.run(
-                        [_PY, _script("retrain_all.py"), "--regime-only"],
+                        [_PY, _script("refit_regime.py")],
                         capture_output=True, text=True, timeout=300,
                     )
                     if rc.returncode == 0:
                         st.success("regime refit done")
+                        if rc.stdout.strip():
+                            st.code(rc.stdout[-1000:])
                     else:
                         st.error(f"failed: {rc.stderr[-500:]}")
                 except subprocess.TimeoutExpired:
                     st.error("refit timed out (300s)")
                 except FileNotFoundError:
-                    st.warning("scripts/retrain_all.py --regime-only not wired; "
+                    st.warning("scripts/refit_regime.py not found; "
                                 "run manually: python scripts/refit_regime.py")
     with cols[1]:
         if st.button("🔁 Retrain universal", use_container_width=True,
