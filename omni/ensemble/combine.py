@@ -78,7 +78,18 @@ def _soft_model_weight(out: pd.DataFrame, cfg: BlendConfig) -> np.ndarray:
 def blend(df: pd.DataFrame, *, cfg: BlendConfig | None = None) -> pd.DataFrame:
     """`df` must have columns `proba_up` and `rubric_total`.
 
-    Returns df augmented with: blended_p, conviction, direction.
+    Returns df augmented with: blended_p, conviction, direction, plus the
+    Phase 24.21 confidence-decomposition columns:
+      - blend_w_model        per-row model weight used in the blend
+      - blend_w_rubric       per-row rubric weight (= 1 - w_model)
+      - blend_model_contrib  w_model * proba_up   (in [0, 1])
+      - blend_rubric_contrib w_rubric * (rubric_total / 100)
+      - pre_gate_conviction  conviction BEFORE any gate / regime multiplier
+
+    The decomposition columns are pure information — they do not change the
+    blended_p / conviction / direction logic. Downstream consumers
+    (waterfall chart, explainability panel) read them by name; consumers
+    that don't know about them are unaffected.
 
     Regime-aware re-weighting:
         The default 60/40 (model/rubric) weighting assumes the model
@@ -101,10 +112,24 @@ def blend(df: pd.DataFrame, *, cfg: BlendConfig | None = None) -> pd.DataFrame:
     w_model_per_row = _soft_model_weight(out, cfg)
     w_rubric_per_row = 1.0 - w_model_per_row
 
-    blended = w_model_per_row * p.to_numpy() + w_rubric_per_row * r.to_numpy()
+    p_arr = p.to_numpy()
+    r_arr = r.to_numpy()
+    model_contrib = w_model_per_row * p_arr
+    rubric_contrib = w_rubric_per_row * r_arr
+    blended = model_contrib + rubric_contrib
+
     out["blended_p"] = blended
     out["conviction"] = (pd.Series(blended).sub(0.5).abs() * 200.0).clip(0, 100).values
     out["direction"] = np.where(blended > 0.5 + cfg.neutral_band, 1,
                        np.where(blended < 0.5 - cfg.neutral_band, -1, 0))
+
+    # Phase 24.21 — confidence decomposition. Cheap to compute (no extra
+    # passes) and immediately surfaces "what dragged conviction down" via
+    # the waterfall chart in the dashboard.
+    out["blend_w_model"] = w_model_per_row
+    out["blend_w_rubric"] = w_rubric_per_row
+    out["blend_model_contrib"] = model_contrib
+    out["blend_rubric_contrib"] = rubric_contrib
+    out["pre_gate_conviction"] = out["conviction"].values
     return out
 
