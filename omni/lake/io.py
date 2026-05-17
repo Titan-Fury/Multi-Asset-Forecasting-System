@@ -25,15 +25,23 @@ _PRICE_COLS = ["date", "open", "high", "low", "close", "adj_close", "volume",
 
 
 # ---------------------------------------------------------------- prices ----
-def read_prices(ticker: str, asset_class: str) -> pd.DataFrame:
-    """Read full price history for one ticker. Empty DataFrame if not in lake."""
+def read_prices(ticker: str, asset_class: str, *,
+                columns: list[str] | None = None) -> pd.DataFrame:
+    """Read full price history for one ticker. Empty DataFrame if not in lake.
+
+    Phase 24.21 — added optional ``columns`` projection. Callers like
+    `last_price_date` only need the date column; pyarrow/parquet column
+    pruning skips the rest of the columnar chunks entirely on disk.
+    """
     p = paths.prices_path(asset_class, ticker)
     if not p.exists():
         return pd.DataFrame(columns=_PRICE_COLS)
-    df = pd.read_parquet(p)
+    df = pd.read_parquet(p, columns=columns)
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
-    return df.sort_values("date").reset_index(drop=True)
+    if "date" in df.columns:
+        return df.sort_values("date").reset_index(drop=True)
+    return df.reset_index(drop=True)
 
 
 def write_prices(df: pd.DataFrame, ticker: str, asset_class: str) -> int:
@@ -60,7 +68,9 @@ def append_prices(new_rows: pd.DataFrame, ticker: str, asset_class: str) -> int:
 
 def last_price_date(ticker: str, asset_class: str) -> pd.Timestamp | None:
     """Return the most recent date in the lake for this ticker, or None."""
-    df = read_prices(ticker, asset_class)
+    # Phase 24.21 — only need the date column. Skipping the other 9 columns
+    # at parquet-read time is essentially free vs. the previous full load.
+    df = read_prices(ticker, asset_class, columns=["date"])
     if df.empty:
         return None
     return pd.Timestamp(df["date"].max())
@@ -75,7 +85,8 @@ def write_fundamentals_snapshot(df: pd.DataFrame, date_iso: str) -> int:
     return len(df)
 
 
-def read_fundamentals_asof(date_iso: str) -> pd.DataFrame:
+def read_fundamentals_asof(date_iso: str, *,
+                           columns: list[str] | None = None) -> pd.DataFrame:
     """Read the most recent fundamentals snapshot at or before ``date_iso``."""
     d = paths.fundamentals_dir()
     if not d.exists():
@@ -84,7 +95,7 @@ def read_fundamentals_asof(date_iso: str) -> pd.DataFrame:
                           reverse=True)
     if not candidates:
         return pd.DataFrame()
-    return pd.read_parquet(candidates[0])
+    return pd.read_parquet(candidates[0], columns=columns)
 
 
 # -------------------------------------------------------------------- news --
@@ -96,14 +107,15 @@ def write_news_day(df: pd.DataFrame, date_iso: str) -> int:
     return len(df)
 
 
-def read_news_window(start_iso: str, end_iso: str) -> pd.DataFrame:
+def read_news_window(start_iso: str, end_iso: str, *,
+                     columns: list[str] | None = None) -> pd.DataFrame:
     d = paths.news_dir()
     if not d.exists():
         return pd.DataFrame()
     parts = []
     for f in sorted(d.glob("*.parquet")):
         if start_iso <= f.stem <= end_iso:
-            parts.append(pd.read_parquet(f))
+            parts.append(pd.read_parquet(f, columns=columns))
     if not parts:
         return pd.DataFrame()
     return pd.concat(parts, ignore_index=True, sort=False)
