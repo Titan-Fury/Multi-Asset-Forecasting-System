@@ -26,21 +26,45 @@ def series(series_id: str, *, lookback_years: int = 10) -> pd.DataFrame:
         return pd.DataFrame(columns=["date", "series_id", "value"])
     end = date.today()
     start = end - timedelta(days=int(lookback_years * 365.25))
-    try:
-        r = requests.get(
-            "https://api.stlouisfed.org/fred/series/observations",
-            params={"series_id": series_id, "api_key": key, "file_type": "json",
-                     "observation_start": start.isoformat(),
-                     "observation_end": end.isoformat()},
-            timeout=30,
-        )
-        if r.status_code != 200:
-            log.warning(f"fred {series_id} {r.status_code}: {r.text[:200]}")
+
+    # Phase 24.21 — FRED returns intermittent 500s during their nightly
+    # maintenance windows. Was failing fast and dropping the macro series for
+    # the whole day; now we retry with exponential backoff so a single 500
+    # blip doesn't leave us with empty CPI/VIX/UST features.
+    last_text = ""
+    last_status = 0
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                "https://api.stlouisfed.org/fred/series/observations",
+                params={"series_id": series_id, "api_key": key, "file_type": "json",
+                         "observation_start": start.isoformat(),
+                         "observation_end": end.isoformat()},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                try:
+                    obs = r.json().get("observations", [])
+                except ValueError:
+                    log.warning(f"fred {series_id}: malformed JSON response")
+                    return pd.DataFrame(columns=["date", "series_id", "value"])
+                break
+            last_status = r.status_code
+            last_text = r.text[:200]
+            if r.status_code in (500, 502, 503, 504) and attempt < 2:
+                # backoff 2s, 4s
+                import time as _t
+                _t.sleep(2 ** (attempt + 1))
+                continue
+            log.warning(f"fred {series_id} {r.status_code}: {last_text}")
             return pd.DataFrame(columns=["date", "series_id", "value"])
-        obs = r.json().get("observations", [])
-    except Exception as e:
-        log.warning(f"fred fetch failed for {series_id}: {e}")
-        return pd.DataFrame(columns=["date", "series_id", "value"])
+        except Exception as e:
+            if attempt < 2:
+                import time as _t
+                _t.sleep(2 ** (attempt + 1))
+                continue
+            log.warning(f"fred fetch failed for {series_id}: {e}")
+            return pd.DataFrame(columns=["date", "series_id", "value"])
 
     rows = []
     for o in obs:
