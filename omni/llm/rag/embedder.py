@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import OrderedDict
 from typing import Iterable
 
 import numpy as np
@@ -46,8 +47,11 @@ class Embedder:
 
     def __init__(self) -> None:
         self._cache = LLMCache.get()
-        self._mem: dict[str, np.ndarray] = {}
-        self._mem_order: list[str] = []
+        # Phase 24.21 — was a (dict + list) pair where eviction did
+        # `self._mem_order.pop(0)`, an O(n) shift over up to 4096 keys on
+        # every insert past the cap. OrderedDict.popitem(last=False) is O(1)
+        # FIFO eviction and removes the parallel-list-of-keys hazard.
+        self._mem: OrderedDict[str, np.ndarray] = OrderedDict()
         self._mem_cap = 4096
 
     def _mem_get(self, key: str) -> np.ndarray | None:
@@ -57,10 +61,8 @@ class Embedder:
         if key in self._mem:
             return
         self._mem[key] = vec
-        self._mem_order.append(key)
-        if len(self._mem_order) > self._mem_cap:
-            old = self._mem_order.pop(0)
-            self._mem.pop(old, None)
+        while len(self._mem) > self._mem_cap:
+            self._mem.popitem(last=False)  # O(1) FIFO eviction
 
     def embed_one(self, text: str) -> np.ndarray:
         """Embed a single string. Returns (1024,) float32. Uses cache."""
@@ -96,10 +98,19 @@ class Embedder:
             if not is_zero(out[i]):
                 continue
             disk = self._cache.lookup(_CACHE_BACKEND, _CACHE_TASK, k, None)
-            if disk is not None and "vec" in disk:
+            if disk is not None:
                 try:
-                    v = np.array(disk["vec"], dtype=np.float32)
-                    if v.shape == (EMBED_DIM,) and not is_zero(v):
+                    # Phase 24.21 — prefer raw-bytes payload (5x smaller on
+                    # disk + much faster ser/de) but fall back to legacy
+                    # tolist() payload for caches written before this change.
+                    v: np.ndarray | None = None
+                    if "vec_bytes" in disk:
+                        buf = disk["vec_bytes"]
+                        if isinstance(buf, (bytes, bytearray, memoryview)):
+                            v = np.frombuffer(bytes(buf), dtype=np.float32)
+                    elif "vec" in disk:
+                        v = np.array(disk["vec"], dtype=np.float32)
+                    if v is not None and v.shape == (EMBED_DIM,) and not is_zero(v):
                         out[i] = v
                         self._mem_put(k, v)
                         continue
@@ -163,9 +174,13 @@ class Embedder:
                 self._mem_put(global_k, vec)
                 # Disk-cache the success
                 try:
+                    # Phase 24.21 — store raw float32 bytes instead of a
+                    # 2048-element JSON list. ~5x smaller on disk and removes
+                    # both ser/deser CPU cost on cache hits/misses.
                     self._cache.store(
                         _CACHE_BACKEND, _CACHE_TASK, global_k,
-                        {"vec": vec.tolist()}, ttl_days=_CACHE_TTL_DAYS,
+                        {"vec_bytes": vec.astype(np.float32).tobytes()},
+                        ttl_days=_CACHE_TTL_DAYS,
                         params=None,
                     )
                 except Exception as e:
