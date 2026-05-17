@@ -102,6 +102,16 @@ def build_for_ticker(asset_class: str, ticker: str,
             left_on="date", right_on="run_date", direction="backward",
         )
 
+    # Phase 25.1 — quality composites (Sloan accruals, Piotroski F-Score,
+    # Asness-Frazzini-Pedersen QMJ). Added AFTER the fundamentals merge so
+    # their inputs are visible. Crypto/FX produce all-NaN columns by
+    # design. Idempotent + safe.
+    try:
+        from omni.features.quality import add_quality
+        out = add_quality(out)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"quality compute skipped for {ticker}: {e}")
+
     # Sentiment (lagged +1 business day)
     if sentiment is not None and not sentiment.empty:
         s = sentiment[sentiment["ticker"] == ticker].copy()
@@ -195,16 +205,41 @@ def build_universe(*, horizons: tuple[int, ...] = (1, 5, 20)) -> dict[str, int]:
         log.debug(f"flows preload skipped: {e}")
 
     counts: dict[str, int] = {}
+    # Phase 24.21 — was a serial nested loop running build_for_ticker for ~62
+    # tickers, each doing parquet I/O + numpy/pandas compute. Each ticker is
+    # independent (only `macro` / `bhav` / `flows` are shared, and they are
+    # passed in as already-built read-only frames), so we can fan out across
+    # threads to overlap I/O. ProcessPool would be even better for the CPU
+    # portion but introduces pickling overhead for the macro frame; threads
+    # give us most of the win without that cost. Expect ~3-6x speedup on a
+    # typical 4+ core machine.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    max_workers = int(cfg.get("feature_build_workers", 8))
+    tasks: list[tuple[str, str]] = []
     for asset_class, spec in cfg["asset_classes"].items():
         for ticker in spec["tickers"]:
+            tasks.append((asset_class, ticker))
+
+    def _one(asset_class: str, ticker: str) -> tuple[str, int]:
+        try:
+            df = build_for_ticker(
+                asset_class, ticker,
+                macro=macro, bhavcopy_df=bhav, flows_df=flows,
+                horizons=horizons,
+            )
+            return f"{asset_class}/{ticker}", len(df)
+        except Exception as e:
+            log.error(f"feature build failed {asset_class}/{ticker}: {e}")
+            return f"{asset_class}/{ticker}", -1
+
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
+        futs = {ex.submit(_one, ac, tk): (ac, tk) for ac, tk in tasks}
+        for fut in as_completed(futs):
             try:
-                df = build_for_ticker(
-                    asset_class, ticker,
-                    macro=macro, bhavcopy_df=bhav, flows_df=flows,
-                    horizons=horizons,
-                )
-                counts[f"{asset_class}/{ticker}"] = len(df)
-            except Exception as e:
-                log.error(f"feature build failed {asset_class}/{ticker}: {e}")
-                counts[f"{asset_class}/{ticker}"] = -1
+                key, n = fut.result()
+                counts[key] = n
+            except Exception as e:  # noqa: BLE001
+                ac, tk = futs[fut]
+                log.error(f"feature build crashed {ac}/{tk}: {e}")
+                counts[f"{ac}/{tk}"] = -1
     return counts
