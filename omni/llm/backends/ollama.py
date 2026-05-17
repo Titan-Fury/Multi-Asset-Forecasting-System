@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from omni.llm.backends.base import Backend, BackendError, LLMResult
+from omni.llm.backends.base import Backend, BackendError, LLMResult, http_session
 
 
 class OllamaBackend(Backend):
@@ -36,7 +36,8 @@ class OllamaBackend(Backend):
         }
         t0 = time.monotonic()
         try:
-            r = requests.post(self._url(), json=body, timeout=timeout)
+            # Phase 24.21 — pooled session.
+            r = http_session().post(self._url(), json=body, timeout=timeout)
         except Exception as e:
             raise BackendError(f"ollama request failed: {e}") from e
         if r.status_code != 200:

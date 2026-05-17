@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-from omni.llm.backends.base import Backend, BackendError, LLMResult
+from omni.llm.backends.base import Backend, BackendError, LLMResult, http_session
 from omni.utils.env import get_env
 
 _BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -40,7 +40,8 @@ class OpenRouterBackend(Backend):
         }
         t0 = time.monotonic()
         try:
-            r = requests.post(_BASE_URL, json=body, headers=headers, timeout=60)
+            # Phase 24.21 — use pooled session to skip per-call TLS handshake.
+            r = http_session().post(_BASE_URL, json=body, headers=headers, timeout=60)
         except Exception as e:
             raise BackendError(f"openrouter request failed: {e}") from e
         if r.status_code == 429:

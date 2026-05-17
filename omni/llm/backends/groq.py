@@ -12,7 +12,7 @@ from typing import Any
 
 import requests
 
-from omni.llm.backends.base import Backend, BackendError, LLMResult
+from omni.llm.backends.base import Backend, BackendError, LLMResult, http_session
 from omni.utils.env import get_env
 
 _BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -40,7 +40,8 @@ class GroqBackend(Backend):
         }
         t0 = time.monotonic()
         try:
-            r = requests.post(_BASE_URL, json=body, headers=headers,
+            # Phase 24.21 — pooled session (shared across backends).
+            r = http_session().post(_BASE_URL, json=body, headers=headers,
                               timeout=int(self.config.get("timeout_s", 60)))
         except Exception as e:
             raise BackendError(f"groq request failed: {e}") from e
