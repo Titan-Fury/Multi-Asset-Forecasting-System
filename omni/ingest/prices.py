@@ -21,6 +21,16 @@ from omni.storage import tiers
 from omni.utils.env import universe
 from omni.utils.logger import log
 
+# Phase 24.20 — module-level ccxt availability check. Was importing inside
+# `_fetch_ccxt` which meant tenacity retried 2× on every crypto fetch even
+# when ccxt was simply not installed (32+ ImportError stack traces / run).
+try:
+    import ccxt as _ccxt  # type: ignore
+    _HAS_CCXT = True
+except Exception:  # noqa: BLE001
+    _ccxt = None  # type: ignore[assignment]
+    _HAS_CCXT = False
+
 _OHLCV_COLS = ["date", "open", "high", "low", "close", "adj_close", "volume"]
 
 
@@ -37,6 +47,25 @@ _BSE_ONLY_INDIA: frozenset[str] = frozenset({
 })
 
 
+# Phase 24.21 — explicit symbol-alias map for tickers that users / configs
+# write in a non-Yahoo form. Each maps to the canonical yfinance symbol so
+# the ".NS"/".BO" suffix logic below skips for these (the alias is already
+# fully qualified). Kept minimal and reviewed by hand: aliases only for
+# names that have produced repeated "No price rows fetched" warnings.
+_SYMBOL_ALIASES: dict[tuple[str, str], str] = {
+    # Index name → Yahoo index symbol
+    ("india", "NIFTY 50"):       "^NSEI",
+    ("india", "NIFTY"):          "^NSEI",
+    ("india", "SENSEX"):         "^BSESN",
+    ("india", "BANKNIFTY"):      "^NSEBANK",
+    # Common misspellings that match the user's mental model but aren't
+    # what yfinance returns. TATAMOTORS still trades as TATAMOTORS.NS,
+    # but old historical configs / search-history can carry HINDUSTANMOTORS
+    # which is the wrong suffix expansion of HINDMOTORS.
+    ("india", "HINDUSTANMOTORS"): "HINDMOTORS.BO",
+}
+
+
 def is_bse_only(ticker: str) -> bool:
     """True if `ticker` is an India equity that trades only on BSE.
     Bare ticker only (no suffix) — caller normalises before checking."""
@@ -44,6 +73,12 @@ def is_bse_only(ticker: str) -> bool:
 
 
 def _yf_symbol(asset_class: str, ticker: str) -> str:
+    # Phase 24.21 — alias lookup first so users typing "NIFTY 50" don't
+    # blow through the suffix logic and end up with "NIFTY 50.NS" (which
+    # yfinance can't resolve, generating perpetual no-rows warnings).
+    alias = _SYMBOL_ALIASES.get((asset_class, ticker.upper()))
+    if alias:
+        return alias
     # Indexes (e.g. ^NSEI, ^GSPC) and already-suffixed tickers pass through.
     if ticker.startswith("^") or "=" in ticker or "-" in ticker or "." in ticker:
         return ticker
@@ -99,10 +134,17 @@ def fetch_prices(asset_class: str, ticker: str, *, start: str, end: str) -> pd.D
     """Fetch OHLCV for a single (asset_class, ticker). Tries primary, falls back on empty/error."""
     df: pd.DataFrame
     if asset_class == "crypto":
-        try:
-            df = _fetch_ccxt(ticker, start, end)
-        except Exception as e:
-            log.warning(f"ccxt failed for {ticker}: {e}; falling back to yfinance")
+        # Phase 24.21 — short-circuit straight to yfinance when ccxt isn't
+        # installed instead of attempting + warning + retrying. Was emitting
+        # 32+ "ccxt failed" warnings per run when the package isn't on the
+        # machine.
+        if _HAS_CCXT:
+            try:
+                df = _fetch_ccxt(ticker, start, end)
+            except Exception as e:
+                log.warning(f"ccxt failed for {ticker}: {e}; falling back to yfinance")
+                df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
+        else:
             df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
     else:
         df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
