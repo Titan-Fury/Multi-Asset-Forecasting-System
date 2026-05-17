@@ -57,33 +57,92 @@ def _kw_match(row: pd.Series, regex: re.Pattern) -> int:
     return 1 if regex.search(text) else 0
 
 
+def _batch_score_finbert(texts: list[str]) -> list[float] | None:
+    """Phase 24.21 — try to score every text in a single FinBERT batch
+    dispatch. Returns the list of signed scores aligned to `texts`, or None
+    if the FinBERT backend isn't available (caller falls back to the
+    per-item router path so behaviour is preserved on machines without
+    transformers/torch).
+
+    Why: the previous per-row `route("sentiment_per_article", text)` loop
+    was the single biggest hot-path bottleneck (200 articles = 200 sequential
+    model calls). Native HF pipeline batching is 10-50x faster on GPU and
+    still 3-5x faster on CPU because we kill the Python-loop overhead.
+    """
+    try:
+        from omni.llm.backends.finbert import FinBERTBackend
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        # Reuse the FinBERTBackend instance the router already constructed
+        # if one exists, so we don't double-load the model.
+        from omni.llm.router import Router
+        router = Router.get()
+        be = router._backends.get("finbert")  # type: ignore[attr-defined]
+        if be is None:
+            be = FinBERTBackend("finbert", router.cfg.get("backends", {}).get("finbert", {}))
+            router._backends["finbert"] = be  # type: ignore[attr-defined]
+        results = be.complete_batch(texts)
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"finbert batch unavailable, falling back to per-item route: {e}")
+        return None
+    return [float(r.extra.get("signed_score", 0.0)) for r in results]
+
+
 def score_articles(news: pd.DataFrame) -> pd.DataFrame:
     """Add a `sent_score` column in [-1, 1] per row using the router.
 
     Router task `sentiment_per_article` -> finbert. Cached per (text), so
     repeated runs on the same articles are free.
+
+    Phase 24.21 — vectorized: one FinBERT batch call instead of N router
+    calls inside iterrows(). Falls back to the per-row router if FinBERT
+    isn't installed locally so the public behaviour is unchanged.
     """
     if news.empty:
         return news.assign(sent_score=[])
     out = news.copy()
-    scores: list[float] = []
-    for _, r in out.iterrows():
-        text = f"{r.get('title', '')}. {r.get('description', '')}".strip()
-        if not text:
-            scores.append(0.0)
-            continue
-        try:
-            res = route("sentiment_per_article", text[:512])
-            scores.append(float(res.extra.get("signed_score", 0.0)))
-        except BackendError as e:
-            log.warning(f"sentiment scoring failed: {e}")
-            scores.append(0.0)
+
+    # Build the text column once, vectorized. `(title + ". " + description)`
+    # mirrors the prior per-row construction; `.str.slice(0, 512)` matches
+    # the FinBERT 512-token cap. Empty strings are scored as 0.0 below.
+    titles = out.get("title", pd.Series([""] * len(out))).fillna("").astype(str)
+    descs = out.get("description", pd.Series([""] * len(out))).fillna("").astype(str)
+    texts = (titles + ". " + descs).str.strip().str.slice(0, 512)
+
+    non_empty_mask = texts.str.len() > 0
+    non_empty_texts = texts[non_empty_mask].tolist()
+
+    scores = [0.0] * len(out)
+    batch_scores = _batch_score_finbert(non_empty_texts) if non_empty_texts else []
+    if batch_scores is not None and len(batch_scores) == len(non_empty_texts):
+        # Fast path: FinBERT batch worked.
+        idx_iter = iter(batch_scores)
+        for i, ok in enumerate(non_empty_mask):
+            if ok:
+                scores[i] = next(idx_iter)
+    else:
+        # Slow fallback: per-row router (preserves original semantics, works
+        # without finbert installed).
+        for i, (txt, ok) in enumerate(zip(texts, non_empty_mask)):
+            if not ok:
+                continue
+            try:
+                res = route("sentiment_per_article", txt)
+                scores[i] = float(res.extra.get("signed_score", 0.0))
+            except BackendError as e:
+                log.warning(f"sentiment scoring failed: {e}")
+
     out["sent_score"] = scores
-    # Phase 24.18 — also tag each article with binary keyword-group flags so
-    # `aggregate()` can roll them up alongside the sentiment scores.
-    out["panic_kw"] = out.apply(lambda r: _kw_match(r, _PANIC_KEYWORDS), axis=1)
-    out["promoter_kw"] = out.apply(lambda r: _kw_match(r, _PROMOTER_KEYWORDS), axis=1)
-    out["sebi_kw"] = out.apply(lambda r: _kw_match(r, _SEBI_KEYWORDS), axis=1)
+
+    # Phase 24.21 — vectorized keyword tagging. Was three df.apply(axis=1)
+    # passes calling _kw_match per row; that's O(rows × 3) Python invocations.
+    # `str.contains` with a compiled regex runs in pandas/C and is 20-100x
+    # faster on typical article counts.
+    text_combined = (titles + " " + descs)
+    out["panic_kw"] = text_combined.str.contains(_PANIC_KEYWORDS, na=False).astype(int)
+    out["promoter_kw"] = text_combined.str.contains(_PROMOTER_KEYWORDS, na=False).astype(int)
+    out["sebi_kw"] = text_combined.str.contains(_SEBI_KEYWORDS, na=False).astype(int)
     return out
 
 
@@ -106,13 +165,20 @@ def aggregate(scored: pd.DataFrame, *, ticker_col: str = "ticker_hint") -> pd.Da
         if col not in df.columns:
             df[col] = 0
 
+    # Phase 24.21 — was using `grp.apply(lambda s: (s>0.2).mean())` for
+    # sent_pos_share / sent_neg_share, which invokes Python per group. Tag
+    # bool flags first so we can use a vectorized .mean() aggregation that
+    # stays in C.
+    df["_pos_flag"] = (df["sent_score"] > 0.2).astype(float)
+    df["_neg_flag"] = (df["sent_score"] < -0.2).astype(float)
+
     grp = df.groupby(["ticker", "date"])
     agg = pd.DataFrame({
         "n_articles": grp.size(),
         "sent_mean": grp["sent_score"].mean(),
         "sent_std": grp["sent_score"].std(ddof=0),
-        "sent_pos_share": grp["sent_score"].apply(lambda s: (s > 0.2).mean()),
-        "sent_neg_share": grp["sent_score"].apply(lambda s: (s < -0.2).mean()),
+        "sent_pos_share": grp["_pos_flag"].mean(),
+        "sent_neg_share": grp["_neg_flag"].mean(),
         "panic_kw_count": grp["panic_kw"].sum(),
         "promoter_kw_count": grp["promoter_kw"].sum(),
         "sebi_kw_count": grp["sebi_kw"].sum(),
