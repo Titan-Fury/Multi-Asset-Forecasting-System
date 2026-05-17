@@ -281,6 +281,7 @@ def _theme_override(choice: str) -> None:
     )
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _suggest_options(query: str) -> list[str]:
     """Return labels for the autocomplete: 'TICKER  —  Display name'.
 
@@ -385,15 +386,18 @@ def _render_watchlist_tab() -> None:
         st.warning(f"Removed {n} ticker(s).")
         st.rerun()
 
-    rows = []
-    for fav in favs:
+    # Phase 24.20 — parallelize Watchlist scoring (was serial: 5-10 favs ×
+    # ~10s each = 50-100s blocking). Mirrors the Portfolio tab pattern.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _score_fav(fav: dict) -> dict:
         try:
             card = predict_ticker(
                 fav["ticker"], fav["asset_class"],
                 display_name=fav.get("display_name", fav["ticker"]),
             )
             if card is None:
-                rows.append({
+                return {
                     "ticker": fav["ticker"],
                     "name": fav.get("display_name", fav["ticker"]),
                     "asset_class": fav["asset_class"],
@@ -403,11 +407,10 @@ def _render_watchlist_tab() -> None:
                     "regime": "—",
                     "passes_gate": False,
                     "added_at": fav.get("added_at", "")[:10],
-                })
-                continue
+                }
             d = card.to_dict()
             arrow = {1: "▲ long", -1: "▼ short", 0: "● flat"}.get(d.get("direction", 0), "?")
-            rows.append({
+            return {
                 "ticker": d["ticker"],
                 "name": fav.get("display_name", d["ticker"]),
                 "asset_class": d.get("asset_class", fav["asset_class"]),
@@ -417,16 +420,49 @@ def _render_watchlist_tab() -> None:
                 "regime": d.get("regime", "—"),
                 "passes_gate": bool(d.get("passes_gate", False)),
                 "added_at": fav.get("added_at", "")[:10],
-            })
+            }
         except Exception as exc:  # noqa: BLE001
-            rows.append({
+            return {
                 "ticker": fav["ticker"],
                 "name": fav.get("display_name", fav["ticker"]),
                 "asset_class": fav["asset_class"],
                 "direction": f"err: {type(exc).__name__}",
                 "prob_up": None, "conviction": None, "regime": "—",
                 "passes_gate": False, "added_at": fav.get("added_at", "")[:10],
-            })
+            }
+
+    rows: list[dict] = []
+    progress = st.progress(0.0, text=f"Scoring {len(favs)} favorites…")
+    completed = 0
+    try:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = {ex.submit(_score_fav, fav): fav for fav in favs}
+            for fut in as_completed(futures):
+                try:
+                    rows.append(fut.result(timeout=60))
+                except Exception as _e:
+                    fav = futures.get(fut, {})
+                    _log.warning("watchlist: %s timed out / failed: %s",
+                                  fav.get("ticker", "?"), _e)
+                    rows.append({
+                        "ticker": fav.get("ticker", "?"),
+                        "name": fav.get("display_name", fav.get("ticker", "?")),
+                        "asset_class": fav.get("asset_class", "?"),
+                        "direction": "err: timeout",
+                        "prob_up": None, "conviction": None, "regime": "—",
+                        "passes_gate": False,
+                        "added_at": fav.get("added_at", "")[:10],
+                    })
+                completed += 1
+                progress.progress(completed / len(favs))
+    except Exception:
+        _log.warning("watchlist threadpool failed; falling back to serial",
+                      exc_info=True)
+        rows = [_score_fav(fav) for fav in favs]
+    progress.empty()
+    # Preserve the user's watchlist order regardless of completion order.
+    order = {f["ticker"]: i for i, f in enumerate(favs)}
+    rows.sort(key=lambda r: order.get(r["ticker"], 0))
 
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -2071,6 +2107,50 @@ def _render_freshness_banner() -> None:
     )
 
 
+def _prewarm_favorites_once() -> None:
+    """Phase 24.21 — prewarm `predict_ticker` diskcache for the user's
+    watchlist favorites in a daemon thread on first render of a session.
+
+    Why: even with the watchlist tab parallelized, the first visit to the
+    Watchlist section after a cold cache still pays 5-15s per ticker.
+    Kicking off a background warm at app start means by the time the user
+    clicks Watchlist, results are typically already cached.
+
+    Strictly best-effort: any exception is swallowed, the thread is daemon
+    so it never blocks shutdown, and a session_state flag ensures we only
+    fire once per browser session (not per Streamlit rerun).
+    """
+    if st.session_state.get("_favs_prewarmed"):
+        return
+    st.session_state["_favs_prewarmed"] = True
+    try:
+        from omni.dashboard import watchlist as _wl
+        favs = _wl.list_favorites()
+    except Exception:  # noqa: BLE001
+        return
+    if not favs:
+        return
+
+    def _warm() -> None:
+        try:
+            from omni.ondemand.predict import predict_ticker
+        except Exception:  # noqa: BLE001
+            return
+        for fav in favs:
+            try:
+                predict_ticker(
+                    fav["ticker"], fav["asset_class"],
+                    display_name=fav.get("display_name", fav["ticker"]),
+                )
+            except Exception:  # noqa: BLE001
+                # Prewarm is best-effort; never let a single bad ticker
+                # take down the warming pass.
+                continue
+
+    import threading
+    threading.Thread(target=_warm, daemon=True, name="omni-prewarm").start()
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Omni_Stocks · Multi-asset signals",
@@ -2079,6 +2159,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     inject_theme()
+    _prewarm_favorites_once()
 
     # Phase 24.2 — live market data marquee at the very top.
     # Cached for 5 minutes via st.cache_data inside the module; falls back
