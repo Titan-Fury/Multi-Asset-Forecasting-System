@@ -35,6 +35,33 @@ from omni.ondemand.quality import Provenance
 from omni.ondemand.regime_live import RegimeOutput, fit_or_load as _regime_load
 from omni.utils.logger import log
 
+# Phase 24.21 — negative cache for tickers we already proved don't resolve
+# anywhere. Keyed by (asset_class, ticker.upper()), value = monotonic-clock
+# expiry. We'd otherwise re-pay the full prices+fundamentals+news fan-out on
+# every dashboard click for a typo'd ticker, AND log "no prices for ..." each
+# time. 24h TTL is short enough that genuinely new listings still get picked
+# up the next day, long enough to suppress the warning storm we see in logs.
+import time as _time
+
+_NEG_TTL_SECONDS = 24 * 60 * 60
+_negative_cache: dict[tuple[str, str], float] = {}
+
+
+def _neg_cache_hit(asset_class: str, ticker: str) -> bool:
+    key = (asset_class, ticker.upper())
+    expiry = _negative_cache.get(key)
+    if expiry is None:
+        return False
+    if _time.monotonic() > expiry:
+        _negative_cache.pop(key, None)
+        return False
+    return True
+
+
+def _neg_cache_put(asset_class: str, ticker: str) -> None:
+    key = (asset_class, ticker.upper())
+    _negative_cache[key] = _time.monotonic() + _NEG_TTL_SECONDS
+
 
 @dataclass
 class LookupBundle:
@@ -332,6 +359,14 @@ def lookup_ticker(ticker: str, asset_class: str,
     prov = Provenance()
     asof = pd.Timestamp.now().normalize()
 
+    # Phase 24.21 — short-circuit for tickers we've already proven invalid in
+    # the last 24h. Avoids both the wasted network fan-out and the repeating
+    # "lookup: no prices" warning that was showing up ~36x in logs for the
+    # same handful of typos / delisted symbols.
+    if _neg_cache_hit(asset_class, ticker):
+        log.debug(f"lookup: negative-cache hit for {asset_class}/{ticker}")
+        return None
+
     # PRICES (mandatory)
     prices, p_sources, agreement = _prices_combined(asset_class, ticker)
     prov.prices_sources = p_sources
@@ -339,6 +374,7 @@ def lookup_ticker(ticker: str, asset_class: str,
     if prices is None or prices.empty:
         prov.add_warning("no prices from any source")
         log.warning(f"lookup: no prices for {asset_class}/{ticker}")
+        _neg_cache_put(asset_class, ticker)
         return None
 
     # FUNDAMENTALS (optional)
