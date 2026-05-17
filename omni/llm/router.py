@@ -53,6 +53,17 @@ class Router:
         self.cfg = llm_routes()
         self._backends: dict[str, Backend] = {}
         self._cache = LLMCache.get()
+        # Phase 24.21 — circuit breaker for backends that are persistently
+        # unreachable (most commonly ollama_qwen / ollama_phi when Ollama isn't
+        # running, or a backend whose API key was never set). After a small
+        # number of consecutive hard failures we mark the backend "tripped"
+        # for the rest of the process so subsequent calls skip it instantly
+        # instead of paying repeated 4-second connection timeouts. Soft
+        # failures (rate limits, transient 5xx) intentionally do NOT trip the
+        # breaker — those backends are expected to recover.
+        self._breaker_fails: dict[str, int] = {}
+        self._breaker_tripped: set[str] = set()
+        self._BREAKER_THRESHOLD = 3
 
     @classmethod
     def get(cls) -> "Router":
@@ -85,6 +96,21 @@ class Router:
         rl = spec.get("rate_limit") or {}
         return get_limiter(name, rpm=rl.get("rpm"), rpd=rl.get("rpd"))
 
+    @staticmethod
+    def _is_hard_failure(err: Exception) -> bool:
+        """Hard failures = the backend is clearly unreachable / misconfigured.
+        These trip the circuit breaker. Soft failures (rate limits, model 4xx
+        the upstream provider can recover from) do not.
+        """
+        msg = str(err).lower()
+        hard_signals = (
+            "connection refused", "winerror 10061",
+            "no module named", "not installed",
+            "api_key not set", "no endpoints found",
+            "name or service not known", "nodename nor servname",
+        )
+        return any(s in msg for s in hard_signals)
+
     def route(self, task: str, prompt: str, *, use_cache: bool = True, **params: Any) -> LLMResult:
         if task not in self.cfg["tasks"]:
             raise KeyError(f"task '{task}' not configured in llm_routes.yaml")
@@ -93,6 +119,12 @@ class Router:
         last_err: Exception | None = None
 
         for backend_name in chain:
+            # Phase 24.21 — fast-skip backends the breaker has tripped this
+            # process. Saves ~4s of TCP connect timeout per call for ollama
+            # backends when Ollama isn't running locally.
+            if backend_name in self._breaker_tripped:
+                log.debug(f"[{task}] skipping tripped backend '{backend_name}'")
+                continue
             # Cache lookup (per backend so different backends cache independently)
             if use_cache:
                 hit = self._cache.lookup(backend_name, task, prompt, params)
@@ -107,9 +139,24 @@ class Router:
                     self._cache.store(backend_name, task, prompt, result.to_dict(),
                                       ttl_days=ttl_days, params=params)
                 log.debug(f"[{task}] succeeded on {backend_name} ({result.latency_ms:.0f}ms)")
+                # Reset failure counter on success so a backend that briefly
+                # flapped doesn't get tripped on a future bad day.
+                self._breaker_fails.pop(backend_name, None)
                 return result
             except (BackendError, KeyError) as e:
-                log.warning(f"[{task}] backend '{backend_name}' failed: {e}; trying next")
+                if self._is_hard_failure(e):
+                    n = self._breaker_fails.get(backend_name, 0) + 1
+                    self._breaker_fails[backend_name] = n
+                    if n >= self._BREAKER_THRESHOLD:
+                        self._breaker_tripped.add(backend_name)
+                        log.warning(
+                            f"[{task}] backend '{backend_name}' tripped circuit breaker "
+                            f"after {n} hard failures: {e}; will skip for the rest of this process"
+                        )
+                    else:
+                        log.warning(f"[{task}] backend '{backend_name}' failed: {e}; trying next")
+                else:
+                    log.warning(f"[{task}] backend '{backend_name}' failed: {e}; trying next")
                 last_err = e
                 continue
 
