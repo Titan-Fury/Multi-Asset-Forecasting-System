@@ -813,27 +813,31 @@ def prediction_card(card_dict: dict) -> None:
             unsafe_allow_html=True,
         )
 
-    # ---- Phase 24.18 — circuit-risk badge (India equities only) ----
-    # Surfaced only when the model is loaded AND the band is elevated/high.
-    # Below 0.10 we stay silent so the card doesn't get noisy for normal
-    # names. Renders BEFORE rubric pillars so it's prominently visible.
+    # ---- Phase 24.18 / 24.22 — circuit-risk badge (India equities only).
+    # Was previously only rendered when the band was elevated/high. We now
+    # render at every level (low/elevated/high) so the user always sees the
+    # number on India names: "Lower-circuit risk: low (4%)" tells them the
+    # crash-tail model has been consulted and the number is small. Below
+    # 0.05 we still soft-style as a one-line caption to avoid a chunky
+    # green-banner for normal names.
     crisk_pct = card_dict.get("circuit_risk_pct")
     crisk_band = card_dict.get("circuit_risk_band")
-    if (
-        ac == "india"
-        and crisk_pct is not None
-        and crisk_band in ("elevated", "high")
-    ):
+    if ac == "india" and crisk_pct is not None:
         st.markdown("<hr class='hairline'/>", unsafe_allow_html=True)
         if crisk_band == "high":
             bg, border, icon, headline = (
                 "rgba(239, 68, 68, 0.16)", "rgba(239, 68, 68, 0.55)",
                 "⚠", "Lower-circuit risk: HIGH",
             )
-        else:  # elevated
+        elif crisk_band == "elevated":
             bg, border, icon, headline = (
                 "rgba(234, 179, 8, 0.16)", "rgba(234, 179, 8, 0.50)",
                 "⚡", "Lower-circuit risk: elevated",
+            )
+        else:  # low
+            bg, border, icon, headline = (
+                "rgba(34, 197, 94, 0.10)", "rgba(34, 197, 94, 0.30)",
+                "○", "Lower-circuit risk: low",
             )
         st.markdown(
             f"<div style='background:{bg};border:1px solid {border};"
@@ -989,29 +993,74 @@ def prediction_card(card_dict: dict) -> None:
 
     with e_news:
         news = card_dict.get("news_top5") or []
+        # Phase 24.22 — Grow-style compact news cards. Was a flat list of
+        # `<a>{title}</a> ({score}) {source}` lines; now each headline is a
+        # tile with a colored sentiment-rail down the left, source + relative
+        # timestamp on the same row, and the headline as the primary title.
+        # Closer to the per-ticker news strip that Groww / Moneycontrol show.
         with st.expander(f"News · {len(news)} headlines", expanded=False):
             if not news:
                 st.caption("No news pulled this round.")
+            # Prepare a "X hours ago" formatter once
+            now = pd.Timestamp.utcnow().tz_localize(None)
+
+            def _rel_time(iso_str: str) -> str:
+                if not iso_str:
+                    return ""
+                try:
+                    t = pd.to_datetime(iso_str, errors="coerce", utc=True)
+                    if pd.isna(t):
+                        return ""
+                    delta = now - t.tz_localize(None)
+                    secs = int(delta.total_seconds())
+                    if secs < 60:
+                        return "just now"
+                    if secs < 3600:
+                        return f"{secs // 60}m ago"
+                    if secs < 86400:
+                        return f"{secs // 3600}h ago"
+                    return f"{secs // 86400}d ago"
+                except Exception:  # noqa: BLE001
+                    return ""
+
             for n in news:
                 s = float(n.get("sent_score", 0) or 0)
-                color = ("var(--kpi-positive)" if s > 0.2
-                          else "var(--kpi-negative)" if s < -0.2
-                          else "var(--text-muted)")
+                rail_color = ("#22c55e" if s > 0.2
+                              else "#ef4444" if s < -0.2
+                              else "#94a3b8")
+                badge_bg = ("rgba(34, 197, 94, 0.15)" if s > 0.2
+                            else "rgba(239, 68, 68, 0.15)" if s < -0.2
+                            else "rgba(148, 163, 184, 0.15)")
+                badge_label = ("BULLISH" if s > 0.2
+                               else "BEARISH" if s < -0.2
+                               else "NEUTRAL")
                 # Phase 24.16 — escape title/source and validate URL.
                 # News providers are upstream input; do not trust them.
                 _t = _esc(n.get("title", ""))
                 _u = _safe_url(n.get("url", ""))
                 _src = _esc(n.get("source", ""))
+                _when = _rel_time(n.get("published_at", "") or n.get("date", ""))
+                meta_bits = [b for b in (_src, _when) if b]
+                meta_line = " · ".join(meta_bits)
                 st.markdown(
-                    f"<div style='padding:var(--space-2) 0;"
-                    f"border-bottom:1px solid var(--border-subtle);"
-                    f"font-size:var(--text-sm);line-height:1.45'>"
+                    f"<div style='display:flex;gap:12px;padding:12px 14px;"
+                    f"margin-bottom:8px;border:1px solid var(--border-subtle);"
+                    f"border-left:3px solid {rail_color};border-radius:8px;"
+                    f"background:var(--surface-1);'>"
+                    f"<div style='flex:1;min-width:0;'>"
                     f"<a href='{_u}' style='color:var(--text-primary);"
-                    f"text-decoration:none' target='_blank' rel='noopener noreferrer'>{_t}</a>"
-                    f"&nbsp;<span style='color:{color};font-family:JetBrains Mono,monospace;"
-                    f"font-size:var(--text-xs)'>({s:+.2f})</span>"
-                    f"&nbsp;<span style='color:var(--text-muted);font-size:var(--text-xs)'>"
-                    f"{_src}</span></div>",
+                    f"text-decoration:none;font-weight:600;font-size:var(--text-sm);"
+                    f"line-height:1.4;display:block;' target='_blank' rel='noopener noreferrer'>{_t}</a>"
+                    f"<div style='display:flex;gap:10px;align-items:center;margin-top:6px;'>"
+                    f"<span style='font-size:9px;font-weight:700;letter-spacing:0.08em;"
+                    f"padding:2px 8px;border-radius:999px;background:{badge_bg};"
+                    f"color:{rail_color};'>{badge_label}</span>"
+                    f"<span style='font-size:var(--text-xs);color:var(--text-muted);'>"
+                    f"{meta_line}</span>"
+                    f"<span style='font-family:JetBrains Mono,monospace;"
+                    f"font-size:11px;color:{rail_color};margin-left:auto;'>"
+                    f"{s:+.2f}</span>"
+                    f"</div></div></div>",
                     unsafe_allow_html=True,
                 )
 
