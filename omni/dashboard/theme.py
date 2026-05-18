@@ -2597,20 +2597,45 @@ _ULTRA_FX_JS = """
 """
 
 
+_THEME_BUNDLE: str | None = None
+
+
+def _theme_bundle() -> str:
+    """Concatenate every CSS/JS chunk into a single markdown blob.
+
+    Joining once (instead of 8 separate `st.markdown` calls per rerun) cuts
+    Streamlit-side serialization + re-render of ~2600 lines of CSS on every
+    rerun. The result is module-cached so it's joined only once per process.
+    """
+    global _THEME_BUNDLE
+    if _THEME_BUNDLE is None:
+        _THEME_BUNDLE = "\n".join((
+            _FONT_LINK,
+            _CSS,
+            _VT_AND_CMDK_JS,
+            _ADVANCED_FX_CSS,
+            _ADVANCED_FX_JS,
+            _ULTRA_FX_SVG_DEFS,
+            _ULTRA_FX_CSS,
+            _ULTRA_FX_JS,
+        ))
+    return _THEME_BUNDLE
+
+
 def inject_theme() -> None:
-    """Inject the modern minimalist CSS + Inter/JetBrains Mono fonts."""
-    st.markdown(_FONT_LINK, unsafe_allow_html=True)
-    st.markdown(_CSS, unsafe_allow_html=True)
-    # UI4 + UI9 — View Transitions and Cmd+K palette
-    st.markdown(_VT_AND_CMDK_JS, unsafe_allow_html=True)
-    # Phase 23 — cutting-edge effects layer (glass + spotlight + orbs + spring)
-    st.markdown(_ADVANCED_FX_CSS, unsafe_allow_html=True)
-    st.markdown(_ADVANCED_FX_JS, unsafe_allow_html=True)
-    # Phase 23.5 — ULTRA FX (aurora mesh, lighthouse, goo, iridescence,
-    # custom cursor, slot-roll numbers, gradient scrollbar, confetti)
-    st.markdown(_ULTRA_FX_SVG_DEFS, unsafe_allow_html=True)
-    st.markdown(_ULTRA_FX_CSS, unsafe_allow_html=True)
-    st.markdown(_ULTRA_FX_JS, unsafe_allow_html=True)
+    """Inject the modern minimalist CSS + Inter/JetBrains Mono fonts.
+
+    Streamlit rebuilds the DOM on every rerun, so the CSS markdown block
+    MUST be re-emitted each rerun or the page renders unstyled (regime
+    banner blows out to full width, rubric pills stack vertically, the
+    Phase 24.16 skeleton/progress-bar loader becomes plain text, etc.).
+
+    The `_theme_bundle()` string is cached at module load (`_THEME_BUNDLE`
+    is built once and reused), so the cost of this call is one
+    `st.markdown` of a precomputed string -- negligible vs. the
+    appearance regression of skipping it.
+    """
+    st.markdown(_theme_bundle(), unsafe_allow_html=True)
 
 
 def hero(title: str, subtitle: str = "", kicker: str = "") -> None:

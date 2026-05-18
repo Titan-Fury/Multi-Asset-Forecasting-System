@@ -1936,8 +1936,14 @@ def _render_predict_tab() -> None:
         try:
             # Routes through the API client; falls back to in-process
             # automatically when the API isn't reachable.
-            card_dict = predict_via_api(res.ticker, res.asset_class,
-                                         display_name=res.display_name, deep=True)
+            # Phase 24.21 — wrap with st.spinner as a CSS-independent
+            # backstop loader. The skeleton + top progress bar above use
+            # custom CSS classes; if those ever fail to load the spinner
+            # still gives the user a clear "we're working" signal so the
+            # tab never looks frozen.
+            with st.spinner(f"Deep analysis · {res.ticker} (~15s)…"):
+                card_dict = predict_via_api(res.ticker, res.asset_class,
+                                             display_name=res.display_name, deep=True)
         except Exception as exc:  # noqa: BLE001
             progress_slot.empty(); skeleton_slot.empty()
             st.error(f"Deep analysis failed: {exc}")
@@ -1950,8 +1956,10 @@ def _render_predict_tab() -> None:
     elif run_clicked:
         progress_slot, skeleton_slot = _show_loading(f"Predicting {res.ticker}")
         try:
-            card_dict = predict_via_api(res.ticker, res.asset_class,
-                                         display_name=res.display_name, deep=False)
+            # Phase 24.21 — st.spinner backstop (see comment above).
+            with st.spinner(f"Predicting {res.ticker} · fetching live data + scoring…"):
+                card_dict = predict_via_api(res.ticker, res.asset_class,
+                                             display_name=res.display_name, deep=False)
         except Exception as exc:  # noqa: BLE001
             progress_slot.empty(); skeleton_slot.empty()
             st.error(f"Prediction failed: {exc}")
