@@ -431,8 +431,12 @@ def _build_card(
     feat_row = last.iloc[0].copy()
     if bundle.asset_class == "india":
         try:
-            from omni.ingest.sources.nse_oi import oi_features
-            oi_data = oi_features(bundle.ticker)
+            # Phase 25.1 — wrap the live OI fetch with a last-good fallback.
+            # When NSE option-chain endpoint returns empty (anti-bot) we
+            # serve the most recent on-disk snapshot so the OI rubric
+            # pillar isn't permanently stuck at neutral 50.
+            from omni.ondemand.oi_live_cache import get_or_fallback as _oi_get
+            oi_data = _oi_get(bundle.ticker)
             if oi_data.get("has_option_chain"):
                 if "oi_pcr" not in feat_row or pd.isna(feat_row.get("oi_pcr")):
                     feat_row["oi_pcr"] = float(oi_data.get("oi_pcr", 0))
@@ -450,6 +454,53 @@ def _build_card(
             feat_row = patch_altdata(feat_row, bundle.ticker, asset_class="india")
         except Exception as exc:  # noqa: BLE001
             log.debug(f"altdata patch skipped for {bundle.ticker}: {exc}")
+    elif bundle.asset_class == "us":
+        # Phase 25.1 — SEC Form 4 signed insider signals for US tickers.
+        # Reads from EDGAR (cached 1h). Populates two columns the rubric
+        # picks up: `insider_net_dollar_30d` and `cluster_buyers_30d`.
+        # Best-effort: any failure leaves the columns NaN and the rubric
+        # falls back to neutral 50 (existing graceful path).
+        try:
+            from omni.ingest.sources.edgar import insider_score as _form4_score
+            score = _form4_score(bundle.ticker)
+            if pd.isna(feat_row.get("insider_net_dollar_30d", np.nan)):
+                feat_row["insider_net_dollar_30d"] = float(
+                    score.get("insider_net_dollar_30d", 0.0) or 0.0
+                )
+            if pd.isna(feat_row.get("cluster_buyers_30d", np.nan)):
+                feat_row["cluster_buyers_30d"] = float(
+                    score.get("cluster_buyers_30d", 0) or 0
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"SEC Form 4 patch skipped for {bundle.ticker}: {exc}")
+        # Phase 25.1 — CBOE EOD put/call ratio for US tickers. Mirrors the
+        # India OI patch (lines 432-446): populate `oi_pcr` so the rubric's
+        # `oi` pillar gets real US data instead of neutral 50.
+        try:
+            from omni.ingest.sources.cboe import get_us_pcr
+            cboe = get_us_pcr(bundle.ticker)
+            if cboe.get("has_options"):
+                if pd.isna(feat_row.get("oi_pcr", np.nan)):
+                    feat_row["oi_pcr"] = float(cboe.get("pcr", 0.0))
+                # Use total_volume as a coarse `oi_total_lakhs` proxy
+                if pd.isna(feat_row.get("oi_total_lakhs", np.nan)):
+                    feat_row["oi_total_lakhs"] = float(
+                        cboe.get("total_volume", 0.0) / 1e5
+                    )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"CBOE OI patch skipped for {bundle.ticker}: {exc}")
+
+    # Phase 25.1 — earnings_sentiment_z_30d for any asset class with news.
+    # Filters bundle.news_raw for earnings keywords, computes 30d sentiment
+    # z-score. Best-effort; NaN when not enough earnings items in window.
+    try:
+        from omni.features.earnings_sentiment import earnings_sentiment_z_30d
+        if pd.isna(feat_row.get("earnings_sentiment_z_30d", np.nan)):
+            z = earnings_sentiment_z_30d(bundle.news_raw)
+            if z is not None:
+                feat_row["earnings_sentiment_z_30d"] = float(z)
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"earnings_sentiment patch skipped for {bundle.ticker}: {exc}")
     from omni.rubric.scorer import score_row
     rub = score_row(feat_row, regime=regime_label, asset_class=bundle.asset_class)
     pillars = {
@@ -494,6 +545,38 @@ def _build_card(
     daily_ret = (px_sorted["adj_close"].pct_change().dropna()
                   if px_sorted is not None and not px_sorted.empty else pd.Series(dtype=float))
     sigma_d = float(daily_ret.tail(60).std()) if len(daily_ret) >= 20 else 0.0
+
+    # Phase 24.22 — circuit-clipped vol correction (India only).
+    # When a stock has been hitting circuits frequently in the lookback
+    # window, daily returns are clipped at +/-5%/10%/20% and the realized
+    # std underestimates the *true* underlying volatility. The next move
+    # is the one without a circuit-lock cap, so projecting the +/-1sigma
+    # band off the clipped sigma understates downside (this was the
+    # CIANAGRO miss: predictions showed Tomorrow +0.06% while the stock
+    # promptly hit lower-circuit). Inflate sigma by a factor proportional
+    # to the share of circuit bars in the last 60 sessions.
+    if (bundle.asset_class == "india" and px_sorted is not None
+            and len(px_sorted) >= 30):
+        try:
+            from omni.features.circuit import detect_circuit_bars
+            recent = px_sorted.tail(60)
+            is_circ = detect_circuit_bars(recent, asset_class="india")
+            circ_share = float(is_circ.mean()) if len(is_circ) else 0.0
+            if circ_share > 0.0:
+                # Cap inflation at +75% so we never blow the band wider
+                # than 1.75x the realized sigma, even if the entire window
+                # was circuit days.
+                inflation = 1.0 + min(0.75, 1.5 * circ_share)
+                sigma_d = float(sigma_d * inflation)
+                log.debug(
+                    f"sigma inflation [{bundle.ticker}]: circ_share={circ_share:.2f} "
+                    f"-> sigma_d *= {inflation:.2f}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Circuit detection is best-effort; fall through to base sigma
+            # so a missing OHLC column never breaks the projection.
+            log.debug(f"circuit-vol inflation skipped [{bundle.ticker}]: {exc}")
+
     sigma_5d_pct = sigma_d * (5 ** 0.5) * 100.0  # 5-trading-day horizon, in percent
     edge = (float(row.get("blended_p", 0.5)) - 0.5) * 2.0  # in [-1, 1]
     expected_move_pct = float(edge * sigma_5d_pct)
@@ -872,6 +955,35 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
     if card is not None:
         card.circuit_risk_pct = circuit_pct
         card.circuit_risk_band = circuit_band_str
+
+        # Phase 24.22 — circuit-risk conviction shrinker. If the system is
+        # signalling LONG but the dedicated circuit-risk model says there's
+        # an elevated/high probability of a >=9.5% drawdown in the next 5
+        # sessions, the two models disagree. Rather than overrule the gate
+        # outright, we shrink conviction proportionally to the disagreement
+        # so the gate's existing min_conviction threshold has a higher chance
+        # of blocking a bad LONG. Shorts and FLAT signals are unchanged.
+        # SHORT signals are AMPLIFIED slightly because the two models agree.
+        if (circuit_pct is not None and circuit_pct > 0.10
+                and card.direction is not None):
+            try:
+                if int(card.direction) == 1:
+                    # LONG vs. high crash probability -> shrink conviction.
+                    # 0.10 -> 0.95x, 0.25 -> 0.80x, 0.50 -> 0.55x.
+                    mult = max(0.4, 1.0 - 0.9 * float(circuit_pct))
+                    card.conviction = float(card.conviction) * mult
+                    log.debug(
+                        f"circuit-disagreement shrink [{bundle.ticker}]: "
+                        f"long vs p_circ={circuit_pct:.2f} -> conviction *= {mult:.2f}"
+                    )
+                elif int(card.direction) == -1:
+                    # SHORT + high crash probability = same direction; nudge
+                    # conviction up a touch but cap the boost so we don't
+                    # promote a marginal call into a high-conviction one.
+                    boost = min(1.15, 1.0 + 0.4 * float(circuit_pct))
+                    card.conviction = min(100.0, float(card.conviction) * boost)
+            except Exception as exc:  # noqa: BLE001
+                log.debug(f"circuit-disagreement shrink skipped: {exc}")
 
     # ---- Pair / cross-asset signal (Part B) ----
     try:
