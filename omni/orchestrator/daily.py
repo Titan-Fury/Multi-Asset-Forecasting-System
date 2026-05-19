@@ -19,6 +19,7 @@ in isolation.
 """
 from __future__ import annotations
 
+import functools
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -72,6 +73,7 @@ class RunReport:
 
 def _stage(name: str):
     def deco(fn):
+        @functools.wraps(fn)
         def wrapper(rep: RunReport, *args, **kw):
             t0 = time.perf_counter()
             try:

@@ -3,7 +3,7 @@
 OpenRouter exposes the model at the OpenAI-compatible /embeddings
 endpoint with `model="nvidia/llama-nemotron-embed-vl-1b-v2:free"`.
 
-Output: 1024-dim float vector per input string.
+Output: 2048-dim float vector per input string (see EMBED_DIM).
 
 Use cases:
     - S3 news embeddings (replaces FinBERT 768-d for cross-asset
@@ -12,8 +12,8 @@ Use cases:
 
 This module deliberately keeps zero hard dependency on the rest of the
 LLM router so it can be imported during training without pulling the
-full backend stack. Falls back to a 1024-d zero vector if the API key
-is missing — callers should check `is_zero(vec)` before using.
+full backend stack. Falls back to an EMBED_DIM zero vector if the API
+key is missing — callers should check `is_zero(vec)` before using.
 
 Free tier limits (rough): ~20 rpm / ~200 rpd. Always batch (up to 96
 inputs per request) and cache aggressively.
@@ -51,7 +51,7 @@ def embed(texts: Iterable[str],
           api_key: str | None = None,
           timeout_s: float = 30.0,
           retries: int = 2) -> np.ndarray:
-    """Embed a list of texts. Returns (N, 1024) float32 array.
+    """Embed a list of texts. Returns (N, EMBED_DIM) float32 array.
 
     Returns zeros (and logs nothing — caller decides) on any failure.
     """

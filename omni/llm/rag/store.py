@@ -9,7 +9,7 @@ One collection per `(asset_class, doc_type)` combination — e.g.
 `india_news`, `us_filings_10k`. This makes filter+search blazing fast
 because queries never scan documents from the wrong asset class.
 
-Vector dim = 1024 (Nemotron). Distance = cosine.
+Vector dim = 2048 (Nemotron VL 1B v2). Distance = cosine.
 """
 from __future__ import annotations
 

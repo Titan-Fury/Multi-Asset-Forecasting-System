@@ -73,8 +73,12 @@ def option_chain(ticker: str) -> dict:
     last_status: int | None = None
     last_err: str | None = None
 
+    # Phase 24.22 — reuse the warmed-up session across retries instead of
+    # re-warming on every attempt (which doubles the HTTP cost and itself
+    # contributes to rate-limit hits). Only re-warm on auth/rate-limit
+    # failures where a stale cookie is the likely cause.
+    s = _option_chain_warmup()
     for attempt in (1, 2):
-        s = _option_chain_warmup()
         try:
             r = s.get(url, timeout=10)
             last_status = r.status_code
@@ -91,6 +95,7 @@ def option_chain(ticker: str) -> dict:
                 # Rate-limit or cookie expired — warmup again on retry
                 last_err = f"status={r.status_code}"
                 log.debug(f"NSE option chain {ticker} attempt {attempt}: {last_err}")
+                s = _option_chain_warmup()
                 time.sleep(0.5)
                 continue
             else:

@@ -65,13 +65,13 @@ class Embedder:
             self._mem.popitem(last=False)  # O(1) FIFO eviction
 
     def embed_one(self, text: str) -> np.ndarray:
-        """Embed a single string. Returns (1024,) float32. Uses cache."""
+        """Embed a single string. Returns (EMBED_DIM,) float32. Uses cache."""
         if not text or not text.strip():
             return np.zeros(EMBED_DIM, dtype=np.float32)
         return self.embed_many([text])[0]
 
     def embed_many(self, texts: Iterable[str]) -> np.ndarray:
-        """Embed a batch. Returns (N, 1024) float32.
+        """Embed a batch. Returns (N, EMBED_DIM) float32.
 
         Hits in-process LRU first, then disk cache, then makes a single
         Nemotron API call for the remaining miss set (chunked to 96/batch).
@@ -129,7 +129,7 @@ class Embedder:
         for batch_start in range(0, len(miss_texts), _BATCH_SIZE):
             batch = miss_texts[batch_start : batch_start + _BATCH_SIZE]
             try:
-                vecs = _nemotron_embed(batch)  # (B, 1024) normalised
+                vecs = _nemotron_embed(batch)  # (B, EMBED_DIM) normalised
             except Exception as e:
                 _log.warning("nemotron embed call failed: %s", e)
                 # Phase 24.16 — surface the silent failure to the
