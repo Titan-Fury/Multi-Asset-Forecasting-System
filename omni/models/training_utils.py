@@ -46,13 +46,23 @@ def magnitude_weights(fwd_returns: pd.Series, *, floor: float = 0.05,
 
 
 def top_quartile_target(fwd_returns: pd.Series, *,
-                         lookback_window: int = 252) -> np.ndarray:
+                         lookback_window: int = 252,
+                         horizon_days: int = 5) -> np.ndarray:
     """Reframe direction target as 'in top quartile of recent rolling returns'.
 
     Less noisy than raw +1/-1 sign; better matches the alpha most strategies
     actually capture (the right tail of the return distribution).
+
+    Phase 24.22 — leakage fix. The threshold (`rolling_q75`) is a quantile
+    over PAST realized forward returns. A row's `fwd_ret_h` was realized at
+    `t + h`, so a row at time `t` only "knows" labels whose realisation
+    completed by time `t` itself. Shifting by 1 was insufficient: it leaks
+    overlapping labelling windows. Shift by ``horizon_days + 1`` so the
+    threshold sees only labels whose realisation window ended strictly
+    before today's row date.
     """
     r = pd.Series(fwd_returns).copy()
-    rolling_q75 = r.shift(1).rolling(lookback_window, min_periods=30).quantile(0.75)
+    embargo = int(horizon_days) + 1
+    rolling_q75 = r.shift(embargo).rolling(lookback_window, min_periods=30).quantile(0.75)
     out = (r > rolling_q75).astype(int).fillna(0).values
     return out
