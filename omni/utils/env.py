@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from functools import lru_cache
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -34,15 +34,32 @@ def _expand_env(obj: Any) -> Any:
     return obj
 
 
-@lru_cache(maxsize=8)
+# mtime-keyed cache: re-reads the file when it's modified on disk so an
+# operator editing config/llm_routes.yaml during a long-running Streamlit
+# session sees the change without restarting. The previous lru_cache made
+# every config effectively immutable per-process.
+_YAML_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_YAML_LOCK = threading.Lock()
+
+
 def load_yaml(name: str) -> dict[str, Any]:
     """Load a YAML file from config/. Argument is base name without extension."""
     path: Path = config_dir() / f"{name}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"Config not found: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return _expand_env(data)
+    mtime = path.stat().st_mtime
+    cached = _YAML_CACHE.get(name)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    with _YAML_LOCK:
+        cached = _YAML_CACHE.get(name)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        result = _expand_env(data)
+        _YAML_CACHE[name] = (mtime, result)
+        return result
 
 
 def universe() -> dict[str, Any]:
