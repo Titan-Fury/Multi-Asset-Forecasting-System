@@ -73,21 +73,51 @@ def _smooth_states(states: np.ndarray, *, window: int = 5) -> np.ndarray:
     """Min-duration smoothing — collapse runs shorter than `window` into
     the dominant neighbouring state. Reduces regime jitter without losing
     real transitions.
+
+    Phase 24.22 — fixes asymmetric handling: the previous version always
+    replaced a short run with the *previous* state and skipped runs at
+    i==0 entirely (i.e. short runs at the start were preserved, short
+    runs at the end were replaced by the preceding regime). For a series
+    where the LAST run is the user's current regime, that bias produced
+    a stale label at the most-important point. Now: when both neighbours
+    exist, pick the LONGER neighbouring run as the replacement; when only
+    one neighbour exists (start or end of array), use that one.
     """
     out = states.copy()
     n = len(out)
     if n < 2:
         return out
+    # First pass: compute (start_idx, end_idx, length) for every run.
+    runs: list[tuple[int, int]] = []  # list of (start, end) inclusive
     i = 0
     while i < n:
         j = i
         while j + 1 < n and out[j + 1] == out[i]:
             j += 1
-        run_len = j - i + 1
-        if run_len < window and i > 0:
-            # Replace short run with the previous state
-            out[i:j + 1] = out[i - 1]
+        runs.append((i, j))
         i = j + 1
+
+    # Second pass: replace each short run with its dominant neighbour
+    # (the longer of the two adjacent runs). Iterate by index so we read
+    # the original `runs` boundaries even though we mutate `out`.
+    for k, (s, e) in enumerate(runs):
+        run_len = e - s + 1
+        if run_len >= window:
+            continue
+        prev_run = runs[k - 1] if k > 0 else None
+        next_run = runs[k + 1] if k + 1 < len(runs) else None
+        if prev_run is None and next_run is None:
+            # Single-run array; nothing to replace with.
+            continue
+        if prev_run is None:
+            replacement = out[next_run[0]]
+        elif next_run is None:
+            replacement = out[prev_run[0]]
+        else:
+            prev_len = prev_run[1] - prev_run[0] + 1
+            next_len = next_run[1] - next_run[0] + 1
+            replacement = out[prev_run[0]] if prev_len >= next_len else out[next_run[0]]
+        out[s:e + 1] = replacement
     return out
 
 
