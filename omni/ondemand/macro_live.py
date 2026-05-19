@@ -49,7 +49,7 @@ def _fetch_yf_series(symbol: str, *, lookback_years: int = 10) -> pd.DataFrame:
     return df[["date", "value"]].dropna()
 
 
-@cached(ttl=TTL.macro, key="macro_live:v1")
+@cached(ttl=TTL.macro, key="macro_live:v2:{lookback_years}")
 def compute_live(*, lookback_years: int = 10) -> pd.DataFrame:
     """Build the wide macro feature frame from live sources.
 
@@ -110,9 +110,18 @@ def compute_live(*, lookback_years: int = 10) -> pd.DataFrame:
     if gold is not None:
         out["gold_chg_20d"] = gold.pct_change(20).values
     if cpi is not None:
-        out["cpi_yoy"] = cpi.pct_change(12).values
+        # CPI is monthly; pct_change(12) on the daily-ffilled series compares
+        # today vs ~12 *business days* ago, not 12 months. Compute YoY on the
+        # deduplicated monthly values and reindex back to bday with ffill.
+        cpi_monthly = cpi.dropna().drop_duplicates()
+        cpi_yoy_m = cpi_monthly.pct_change(12)
+        out["cpi_yoy"] = cpi_yoy_m.reindex(wide.index, method="ffill").values
     if unrate is not None:
-        roll = unrate.rolling(24, min_periods=12)
-        out["unrate_z_24m"] = ((unrate - roll.mean()) / roll.std(ddof=0)).values
+        # Same monthly-vs-daily mismatch as CPI. 24-month z-score must be
+        # computed on the monthly series, not on a 24-bday rolling window.
+        unrate_monthly = unrate.dropna().drop_duplicates()
+        roll_m = unrate_monthly.rolling(24, min_periods=12)
+        z_m = (unrate_monthly - roll_m.mean()) / roll_m.std(ddof=0)
+        out["unrate_z_24m"] = z_m.reindex(wide.index, method="ffill").values
 
     return out
