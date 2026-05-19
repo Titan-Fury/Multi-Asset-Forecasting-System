@@ -33,15 +33,25 @@ def _today_iso() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _today_utc() -> date:
+    return datetime.now(timezone.utc).date()
+
+
 def _start_for(ticker: str, asset_class: str, lookback_years: int,
                  mode: str) -> str:
-    """Decide the start date for a fetch based on lake state + mode."""
+    """Decide the start date for a fetch based on lake state + mode.
+
+    All "today" boundaries use UTC to stay consistent with `_today_iso()`
+    used by the caller. Mixing `date.today()` (local TZ) with UTC caused
+    incorrect "up-to-date" skips for users in TZs ahead of UTC during
+    the early-morning local window.
+    """
     if mode == "full":
-        return (date.today() - timedelta(days=int(lookback_years * 365.25))).isoformat()
+        return (_today_utc() - timedelta(days=int(lookback_years * 365.25))).isoformat()
     last = _io.last_price_date(ticker, asset_class)
     if last is None:
         # No history yet → fall back to full lookback
-        return (date.today() - timedelta(days=int(lookback_years * 365.25))).isoformat()
+        return (_today_utc() - timedelta(days=int(lookback_years * 365.25))).isoformat()
     return (last + pd.Timedelta(days=1)).date().isoformat()
 
 
