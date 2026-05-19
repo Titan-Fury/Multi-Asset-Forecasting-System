@@ -184,10 +184,22 @@ def compute_microstructure(
         "amihud_illiq_20d": amihud.values,
         "signed_vol_proxy": sv.values,
     })
-    # Robust composite: mean of available z-scores (clip to ±5 first to avoid outlier domination)
+    # Phase 24.22 — composite was averaging only 2 of the 5 produced signals
+    # (the docstring claims "robust z-sum of the five above"). Now we include
+    # all five, but z-score the three non-z components first so the mean is
+    # over comparable scales. clip(-5, 5) keeps outlier days from dominating.
     z_cols = ["delivery_pct_z_60d", "fii_dii_net_z_20d"]
+    extra_cols = ["oi_change_pct_5d", "amihud_illiq_20d", "signed_vol_proxy"]
     z_part = micro[z_cols].clip(-5, 5)
-    micro["microstr_score"] = z_part.mean(axis=1, skipna=True)
+    extras = micro[extra_cols].astype(float)
+    # Cross-sectional z-score across the per-ticker time-series so they
+    # share a unit (sigma) with the *_z_* columns. ddof=0 to keep zero-vol
+    # series finite (returns NaN -> mean(skipna=True) handles it).
+    extras_mean = extras.mean(axis=0, skipna=True)
+    extras_std = extras.std(axis=0, skipna=True, ddof=0)
+    extras_z = ((extras - extras_mean) / extras_std.replace(0, np.nan)).clip(-5, 5)
+    composite = pd.concat([z_part, extras_z], axis=1)
+    micro["microstr_score"] = composite.mean(axis=1, skipna=True)
 
     out = out.drop(columns=[c for c in _MICROSTR_COLS if c in out.columns])
     out = out.merge(micro, on="date", how="left")
