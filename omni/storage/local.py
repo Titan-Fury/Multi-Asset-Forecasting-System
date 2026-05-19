@@ -11,7 +11,14 @@ from omni.utils.logger import log
 
 
 def write_parquet(df: pd.DataFrame | pl.DataFrame, path: Path, *, partition_cols: list[str] | None = None) -> Path:
-    """Write a DataFrame to parquet (snappy). Creates parent dirs."""
+    """Write a DataFrame to parquet (snappy). Creates parent dirs.
+
+    NOTE: when `partition_cols` is set, parquet writes a *directory* (with
+    partition= subfolders), not a single file. If the same `path` was
+    previously used as a flat file (or vice-versa), the on-disk shape
+    must be cleaned up first or the write either fails or leaves a
+    corrupt mixed state. We handle that switch here.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -23,8 +30,13 @@ def write_parquet(df: pd.DataFrame | pl.DataFrame, path: Path, *, partition_cols
         return path
 
     if partition_cols:
+        if path.exists() and path.is_file():
+            path.unlink()
         df.to_parquet(path, partition_cols=partition_cols, compression="snappy", index=False)
     else:
+        if path.exists() and path.is_dir():
+            import shutil
+            shutil.rmtree(path)
         df.to_parquet(path, compression="snappy", index=False)
     log.debug(f"wrote parquet -> {path} ({len(df)} rows)")
     return path
