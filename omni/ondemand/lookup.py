@@ -44,6 +44,7 @@ from omni.utils.logger import log
 import time as _time
 
 _NEG_TTL_SECONDS = 24 * 60 * 60
+_NEG_MAX_SIZE = 10_000  # cap to prevent unbounded growth from typo storms
 _negative_cache: dict[tuple[str, str], float] = {}
 
 
@@ -59,6 +60,18 @@ def _neg_cache_hit(asset_class: str, ticker: str) -> bool:
 
 
 def _neg_cache_put(asset_class: str, ticker: str) -> None:
+    # Periodic eviction of expired entries before insert so a burst of
+    # invalid tickers from a fuzzy-search bot can't grow this dict
+    # without bound for the lifetime of the Streamlit process.
+    if len(_negative_cache) >= _NEG_MAX_SIZE:
+        now = _time.monotonic()
+        expired = [k for k, exp in _negative_cache.items() if exp <= now]
+        for k in expired:
+            _negative_cache.pop(k, None)
+        # If nothing was expired, drop the oldest 25% by expiry.
+        if len(_negative_cache) >= _NEG_MAX_SIZE:
+            for k, _ in sorted(_negative_cache.items(), key=lambda kv: kv[1])[: _NEG_MAX_SIZE // 4]:
+                _negative_cache.pop(k, None)
     key = (asset_class, ticker.upper())
     _negative_cache[key] = _time.monotonic() + _NEG_TTL_SECONDS
 
