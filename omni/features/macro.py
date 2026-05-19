@@ -56,7 +56,8 @@ def _load_yf_macro(names: list[str]) -> pd.DataFrame:
 def compute(*, fred_ids: list[str] | None = None,
             yf_names: list[str] | None = None) -> pd.DataFrame:
     """Build the wide macro feature frame across all available business days."""
-    fred_ids = fred_ids or ["DGS10", "DGS2", "VIXCLS", "DCOILWTICO", "CPIAUCSL", "UNRATE"]
+    fred_ids = fred_ids or ["DGS10", "DGS2", "VIXCLS", "DCOILWTICO",
+                              "CPIAUCSL", "UNRATE", "DEXINUS"]
     yf_names = yf_names or ["vix", "dxy", "us10y", "gold", "oil"]
 
     fred = _load_fred(fred_ids)
@@ -106,9 +107,46 @@ def compute(*, fred_ids: list[str] | None = None,
     if gold is not None:
         out["gold_chg_20d"] = gold.pct_change(20).values
     if cpi is not None:
-        out["cpi_yoy"] = cpi.pct_change(12).values  # monthly series, 12 obs = 1y
+        # Phase 24.22 — CPI is a MONTHLY series; after the bday-reindex+ffill
+        # above it repeats the same value for ~22 business days. Calling
+        # `.pct_change(12)` on the ffilled daily series compares today's CPI
+        # to the value 12 BUSINESS DAYS ago (~2.5 weeks), which almost always
+        # produces 0 (same ffilled value). Compute YoY on the deduplicated
+        # monthly series first (12 monthly observations = 1 year), then
+        # forward-fill back onto the bday index.
+        cpi_monthly = cpi.dropna().drop_duplicates()
+        cpi_yoy_m = cpi_monthly.pct_change(12)
+        out["cpi_yoy"] = cpi_yoy_m.reindex(wide.index).ffill().values
     if unrate is not None:
-        roll = unrate.rolling(24, min_periods=12)
-        out["unrate_z_24m"] = ((unrate - roll.mean()) / roll.std(ddof=0)).values
+        # Phase 24.22 — same fix as CPI above. UNRATE is monthly; rolling(24)
+        # on the daily-ffilled series captured ~24 business days (~1 month)
+        # of distinct values, not 24 months. Compute on monthly series, ffill
+        # the resulting z-score back onto the bday index.
+        unrate_monthly = unrate.dropna().drop_duplicates()
+        roll_m = unrate_monthly.rolling(24, min_periods=12)
+        unrate_z_m = (unrate_monthly - roll_m.mean()) / roll_m.std(ddof=0)
+        out["unrate_z_24m"] = unrate_z_m.reindex(wide.index).ffill().values
+
+    # Phase 25.1 — cross-asset broadcast features. Z-scored over 20
+    # sessions so trees can split on regime tails (vix_z > 2 = panic,
+    # us10y bp shock = duration risk). Broadcast across every ticker
+    # via the existing build.py macro merge — same value for all rows
+    # of a given date, but trees pick up the interaction with other
+    # per-ticker features.
+    inr = _col(["DEXINUS"])
+    if vix is not None:
+        roll = vix.rolling(20, min_periods=10)
+        out["vix_z_20d"] = ((vix - roll.mean()) / roll.std(ddof=0)).values
+    if us10 is not None:
+        # Convert pct-points-per-day diff to basis points (×100)
+        out["us10y_chg_5d_bp"] = (us10.diff(5) * 100).values
+        # Z-score for shape consistency with vix_z_20d
+        roll = us10.diff(5).rolling(20, min_periods=10)
+        out["us10y_chg_5d_z"] = ((us10.diff(5) - roll.mean()) / roll.std(ddof=0)).values
+    if inr is not None:
+        out["usd_inr_level"] = inr.values
+        out["usd_inr_chg_5d_pct"] = (inr.pct_change(5) * 100).values
+        roll = inr.rolling(20, min_periods=10)
+        out["usd_inr_z_20d"] = ((inr - roll.mean()) / roll.std(ddof=0)).values
 
     return out
