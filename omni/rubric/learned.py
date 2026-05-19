@@ -129,23 +129,39 @@ def save_learned_weights(weights: dict, path: Path | str | None = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(weights, indent=2))
     log.info(f"learned-rubric saved -> {p}")
+    # Phase 24.22 — invalidate the in-process cache so a process that
+    # re-trains and re-saves picks up the new weights on the very next
+    # load_learned_weights() call. Previously the cache was permanent and
+    # returned stale weights for the rest of the process lifetime.
+    clear_cache()
     return p
 
 
 _CACHE: dict | None = None
+_CACHE_MTIME: float | None = None  # Phase 24.22 — file mtime sentinel
 
 
 def load_learned_weights(path: Path | str | None = None) -> dict | None:
-    """Load saved learned weights. Returns None if the file is missing."""
-    global _CACHE
+    """Load saved learned weights. Returns None if the file is missing.
+
+    Phase 24.22 — caches are validated against the on-disk mtime so a
+    long-running process (e.g. the dashboard) picks up retrained weights
+    without restart. The previous version cached forever.
+    """
+    global _CACHE, _CACHE_MTIME
     import json
-    if _CACHE is not None:
-        return _CACHE
     p = Path(path) if path else _path()
     if not p.exists():
         return None
     try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = None
+    if _CACHE is not None and _CACHE_MTIME == mtime:
+        return _CACHE
+    try:
         _CACHE = json.loads(p.read_text())
+        _CACHE_MTIME = mtime
         return _CACHE
     except Exception as exc:  # noqa: BLE001
         log.warning(f"learned-rubric load failed: {exc}")
@@ -153,8 +169,9 @@ def load_learned_weights(path: Path | str | None = None) -> dict | None:
 
 
 def clear_cache() -> None:
-    global _CACHE
+    global _CACHE, _CACHE_MTIME
     _CACHE = None
+    _CACHE_MTIME = None
 
 
 def blend_weights(yaml_weights: dict, learned_weights: dict, *,
