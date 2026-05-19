@@ -54,13 +54,21 @@ class RateLimiter:
             self._buckets.append(_Bucket(rpd, rpd / 86_400.0, rpd, now))
 
     def acquire(self, *, block: bool = True, timeout: float | None = None) -> bool:
-        """Try to take one token from each bucket. If block=True, wait until available."""
+        """Try to take one token from each bucket. If block=True, wait until available.
+
+        Buckets are checked atomically before any token is consumed, so a
+        partial-success no longer leaks tokens (e.g. rpm bucket succeeds but
+        rpd fails -> previous code deducted from rpm anyway).
+        """
         if not self._buckets:
             return True
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             with self._lock:
-                if all(b.try_acquire() for b in self._buckets):
+                # Refill all then check availability without consuming.
+                if all(b.time_to_available() == 0.0 for b in self._buckets):
+                    for b in self._buckets:
+                        b.tokens -= 1.0
                     return True
                 wait = max(b.time_to_available() for b in self._buckets)
             if not block:

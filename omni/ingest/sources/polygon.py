@@ -25,18 +25,24 @@ _LAST_CALLS: list[float] = []  # epoch seconds of last 5 calls
 
 
 def _wait_for_slot() -> None:
-    """Block until making a call won't exceed 5 calls per 60s."""
-    with _LOCK:
-        now = time.monotonic()
-        # drop calls older than 60s
-        cutoff = now - 60.0
-        _LAST_CALLS[:] = [t for t in _LAST_CALLS if t > cutoff]
-        if len(_LAST_CALLS) >= 5:
+    """Block until making a call won't exceed 5 calls per 60s.
+
+    Sleeps OUTSIDE the lock so other threads can make progress (and so
+    the per-thread sleep duration is computed against the latest
+    timestamps, not stale ones cached while we held the lock).
+    """
+    while True:
+        with _LOCK:
+            now = time.monotonic()
+            cutoff = now - 60.0
+            _LAST_CALLS[:] = [t for t in _LAST_CALLS if t > cutoff]
+            if len(_LAST_CALLS) < 5:
+                _LAST_CALLS.append(now)
+                return
             sleep_for = 60.0 - (now - _LAST_CALLS[0]) + 0.5
-            if sleep_for > 0:
-                log.debug(f"polygon rate-limit wait {sleep_for:.1f}s")
-                time.sleep(sleep_for)
-        _LAST_CALLS.append(time.monotonic())
+        if sleep_for > 0:
+            log.debug(f"polygon rate-limit wait {sleep_for:.1f}s")
+            time.sleep(sleep_for)
 
 
 def _key() -> str | None:

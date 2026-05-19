@@ -44,12 +44,18 @@ class RunReport:
     run_date: str
     stages: list[StageResult] = field(default_factory=list)
     persist: _persist.PersistResult | None = None
+    notes: list[str] = field(default_factory=list)
 
     def add(self, sr: StageResult) -> None:
         self.stages.append(sr)
         emoji = "OK" if sr.ok else "FAIL"
         log.info(f"[{emoji}] {sr.name} in {sr.seconds:.1f}s "
                  f"{('-- ' + sr.error) if sr.error else ''}")
+
+    def note(self, msg: str) -> None:
+        """Record a non-stage breadcrumb (best-effort sub-step)."""
+        self.notes.append(msg)
+        log.info(f"[NOTE] {msg}")
 
     @property
     def ok(self) -> bool:
@@ -60,6 +66,7 @@ class RunReport:
             "run_date": self.run_date,
             "ok": self.ok,
             "stages": [s.__dict__ for s in self.stages],
+            "notes": list(self.notes),
         }
 
 
@@ -95,6 +102,39 @@ def _stage_mount(rep: RunReport):
 
 @_stage("ingest")
 def _stage_ingest(rep: RunReport, *, run_date: str):
+    # Phase 25.1 — snapshot the alt-data archives FIRST so per-ticker
+    # predictions later in the run can read accumulated history. These
+    # are best-effort: any failure is logged but doesn't abort ingest.
+    try:
+        from omni.ondemand.fii_dii_archive import snapshot_now as _fii_snap
+        hist = _fii_snap()
+        if hist is not None and not hist.empty:
+            rep.note(f"alt-data: fii_dii archive size = {len(hist)}")
+    except Exception as exc:  # noqa: BLE001
+        rep.note(f"alt-data fii_dii snapshot failed (best-effort): {exc}")
+    try:
+        from omni.ondemand.deals_archive import snapshot_now as _deals_snap
+        sizes = _deals_snap()
+        rep.note(f"alt-data: deals archive sizes = {sizes}")
+    except Exception as exc:  # noqa: BLE001
+        rep.note(f"alt-data deals snapshot failed (best-effort): {exc}")
+    # Pre-warm OI live cache for the F&O universe (best-effort, slow if
+    # NSE is rate-limiting; one snapshot per ticker is enough per day).
+    try:
+        from omni.ondemand.oi_live_cache import snapshot_now as _oi_snap
+        from omni.ingest.sources.nse_oi import _KNOWN_FNO_SAMPLE
+        n_ok = 0
+        for sym in _KNOWN_FNO_SAMPLE:
+            try:
+                out = _oi_snap(sym)
+                if out.get("has_option_chain"):
+                    n_ok += 1
+            except Exception:  # noqa: BLE001
+                pass
+        rep.note(f"alt-data: OI cache prewarm hit {n_ok}/{len(_KNOWN_FNO_SAMPLE)}")
+    except Exception as exc:  # noqa: BLE001
+        rep.note(f"alt-data OI prewarm failed (best-effort): {exc}")
+
     from omni.ingest import runner as _ing
     return _ing.run_daily_ingest(run_date=run_date)
 
