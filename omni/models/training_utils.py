@@ -38,6 +38,11 @@ def magnitude_weights(fwd_returns: pd.Series, *, floor: float = 0.05,
     A small ``floor`` keeps even tiny moves from getting zero weight.
     """
     r = pd.Series(fwd_returns).fillna(0.0).abs().values.astype(float)
+    # Phase 24.22 — empty-input guard. With len(r)==0, r.std() is NaN,
+    # the subsequent np.clip / mean operations propagate NaN through the
+    # output and the caller silently consumes an array of NaN weights.
+    if len(r) == 0:
+        return np.array([], dtype=float)
     s = r.std() if r.std() > 0 else 1.0
     r = np.clip(r, 0.0, cap_z * s)
     w = r + floor * s
