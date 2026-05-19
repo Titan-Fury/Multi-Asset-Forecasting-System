@@ -54,7 +54,7 @@ _CACHE_TTL = 30.0
 
 def _cache_get(k: str) -> list[SearchResult] | None:
     hit = _CACHE.get(k)
-    if hit and time.time() - hit[0] < _CACHE_TTL:
+    if hit and time.monotonic() - hit[0] < _CACHE_TTL:
         return hit[1]
     return None
 
@@ -62,7 +62,7 @@ def _cache_get(k: str) -> list[SearchResult] | None:
 def _cache_set(k: str, v: list[SearchResult]) -> None:
     if len(_CACHE) > 256:
         _CACHE.clear()
-    _CACHE[k] = (time.time(), v)
+    _CACHE[k] = (time.monotonic(), v)
 
 
 # ---- Yahoo Finance Search ----
