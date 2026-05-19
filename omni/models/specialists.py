@@ -117,7 +117,28 @@ def train_specialists(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
                     if pred["y_true"].nunique() == 2 else None)
         except Exception:
             auc = None
-        medians = sub[res.feature_cols].apply(pd.to_numeric, errors="coerce").median()
+        # Phase 24.22 — medians used at INFERENCE time should reflect the
+        # most-recent training distribution, not include the OOF-evaluated
+        # rows. The walk-forward fit's last fold trains on everything before
+        # the final test slab, which is the strongest "live" approximation
+        # we have. Compute medians from the rows BEFORE the last fold's test
+        # window so the inference-time fillna value is leak-free relative
+        # to the OOF metric we just reported.
+        try:
+            last_test_dates = pd.to_datetime(last.test_dates)
+            train_cutoff = last_test_dates.min()
+            sub_dates = pd.to_datetime(sub["date"])
+            train_mask = sub_dates < train_cutoff
+            train_sub = sub.loc[train_mask, res.feature_cols]
+            if train_sub.empty:
+                # Defensive fallback for a malformed last fold
+                train_sub = sub[res.feature_cols]
+            medians = train_sub.apply(pd.to_numeric, errors="coerce").median()
+        except Exception as _exc:
+            # Any indexing failure -> fall back to the previous (full-sub)
+            # behaviour so the specialist still trains; just log it.
+            log.debug(f"specialist {name} median pre-cut slice failed: {_exc}")
+            medians = sub[res.feature_cols].apply(pd.to_numeric, errors="coerce").median()
         bundle = SpecialistBundle(
             name=name, feature_cols=res.feature_cols,
             model=last.model, calibrator=last.calibrator,
