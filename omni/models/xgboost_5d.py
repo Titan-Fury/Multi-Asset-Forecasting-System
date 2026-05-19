@@ -30,7 +30,17 @@ from omni.features.build import is_target_col
 from omni.utils.logger import log
 
 # Columns that are identity/metadata, never features
-_DROP_ALWAYS = {"date", "ticker", "asset_class", "run_date", "source"}
+_DROP_ALWAYS = {
+    "date", "ticker", "asset_class", "run_date", "source",
+    # Phase 24.22 — raw OHLCV columns must NOT become features. They are
+    # absolute price levels in each stock's own currency unit, so a tree
+    # learns to split on price-level proxies which leak the ticker's
+    # identity and destroy any chance of cross-ticker generalization.
+    # The technical/diff_lagged feature builders already produce the
+    # ticker-invariant transforms (returns, ratios, z-scores) we want the
+    # model to consume.
+    "open", "high", "low", "close", "adj_close", "volume",
+}
 
 
 def prepare_xy(df: pd.DataFrame, *, target: str = "fwd_dir_5d"
