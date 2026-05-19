@@ -176,10 +176,12 @@ def insider_intensity(ticker: str, *, days: int = 30) -> dict:
             sub = df[df["ticker"].astype(str).str.upper() == ticker.upper()]
             out[key] = int(len(sub))
             if not sub.empty:
-                buys = int((sub.get("side", "").str.upper().fillna("") == "BUY").sum())
-                sells = int((sub.get("side", "").str.upper().fillna("") == "SELL").sum())
-                out["buy_minus_sell"] += buys - sells
-                if "qty" in sub.columns:
+                if "side" in sub.columns:
+                    sides = sub["side"].astype(str).str.upper().fillna("")
+                    buys = int((sides == "BUY").sum())
+                    sells = int((sides == "SELL").sum())
+                    out["buy_minus_sell"] += buys - sells
+                if "qty" in sub.columns and "side" in sub.columns:
                     qsigned = sub.apply(
                         lambda r: float(r.get("qty", 0) or 0)
                                     * (1 if str(r.get("side", "")).upper() == "BUY" else -1),
@@ -188,11 +190,11 @@ def insider_intensity(ticker: str, *, days: int = 30) -> dict:
                     out["net_qty"] += float(qsigned.sum())
                 if "date" in sub.columns:
                     last = pd.to_datetime(sub["date"], errors="coerce").max()
-                    if out["last_deal_date"] is None or (
-                        last is not pd.NaT and (out["last_deal_date"] is None
-                                                 or pd.Timestamp(out["last_deal_date"]) < last)
+                    if pd.notna(last) and (
+                        out["last_deal_date"] is None
+                        or pd.Timestamp(out["last_deal_date"]) < last
                     ):
-                        out["last_deal_date"] = str(pd.Timestamp(last).date()) if last is not pd.NaT else None
+                        out["last_deal_date"] = str(pd.Timestamp(last).date())
     except Exception as e:  # noqa: BLE001
         log.debug(f"insider_intensity({ticker}) failed: {e}")
     return out
