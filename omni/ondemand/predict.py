@@ -749,10 +749,14 @@ def _deterministic_why(direction: int, regime: str, pillars: dict,
       - both LLM attempts came back ungrounded (grounding_score < threshold)
     """
     label = {1: "LONG", -1: "SHORT", 0: "FLAT"}.get(int(direction), "FLAT")
-    strongest = max(pillars.items(), key=lambda kv: abs(kv[1] - 50))
-    return (f"{label} signal in a {regime} regime. Strongest pillar is "
-             f"{strongest[0]} ({strongest[1]:.0f}/100). Model 5d up-probability "
-             f"is {proba_up:.0%}. Conviction {conviction:.0f}/100.")
+    if pillars:
+        strongest = max(pillars.items(), key=lambda kv: abs(kv[1] - 50))
+        pillar_msg = f"Strongest pillar is {strongest[0]} ({strongest[1]:.0f}/100). "
+    else:
+        pillar_msg = ""
+    return (f"{label} signal in a {regime} regime. {pillar_msg}"
+              f"Model 5d up-probability is {proba_up:.0%}. "
+              f"Conviction {conviction:.0f}/100.")
 
 
 def _explain(bundle: LookupBundle, pillars: dict, regime: str,
