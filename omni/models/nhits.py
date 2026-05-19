@@ -216,14 +216,39 @@ class NHiTSBinaryClassifier:
     def predict_panel(
         self, *, dates, tickers, closes
     ) -> np.ndarray:
-        """Per-row probabilities given the same panel triple used at fit time."""
+        """Per-row probabilities given the same panel triple used at fit time.
+
+        Phase 24.22 — emit an explicit warning when fewer than 5% of rows
+        hit the row_proba cache. The cache is keyed by the FORECAST target
+        date produced by the H-step NHITS forecast, so it only contains
+        entries for the H business days immediately following the training
+        cut. If the validation fold spans many more days than H, the bulk
+        of rows fall back to `_global_mean_proba` (~0.5) which makes the
+        NHITS leg contribute essentially zero information to the meta
+        model. The warning surfaces this so it shows up in the daily logs
+        rather than getting buried in a 0.4974 OOF AUC.
+        """
         if self._nf is None or not self._row_proba:
             n = len(dates)
             return np.full(n, self._global_mean_proba, dtype=float)
         out = np.empty(len(dates), dtype=float)
+        hits = 0
         for i, (d, t) in enumerate(zip(dates, tickers)):
             key = (str(t), pd.Timestamp(d))
-            out[i] = self._row_proba.get(key, self._global_mean_proba)
+            v = self._row_proba.get(key)
+            if v is None:
+                out[i] = self._global_mean_proba
+            else:
+                out[i] = v
+                hits += 1
+        if len(dates) > 0 and hits / len(dates) < 0.05:
+            log.warning(
+                f"NHITS: cache hit-rate {hits}/{len(dates)} = "
+                f"{hits / max(len(dates), 1):.1%}. Most rows received the "
+                f"global mean ({self._global_mean_proba:.3f}); the leg is "
+                f"contributing little to the stack. Consider increasing "
+                f"horizon_days or disabling NHITS."
+            )
         return out
 
 
