@@ -433,15 +433,23 @@ def _score_insider(row: pd.Series) -> float:
       block_deal_net_value_cr  net block-deal value last 5 sessions, INR cr
       fii_dii_net_z_20d        country-level institutional flow (broadcasted)
 
+    Phase 25.1 — US tickers additionally read SEC Form 4 signed signals:
+      insider_net_dollar_30d   signed dollar value of insider trades (US)
+      cluster_buyers_30d       distinct insiders net-buying in 30d
+                               (Cohen-Malloy-Pomorski 2012 cluster signal)
+
     Graceful degradation: returns neutral 50 if no insider field exists.
-    For US tickers we additionally check Form 4 metrics if present.
     """
     insider_z = row.get("insider_net_z_20d")
     promoter_chg = row.get("promoter_holding_chg")
     block_net = row.get("block_deal_net_value_cr")
     fii_dii_z = row.get("fii_dii_net_z_20d")
+    # Phase 25.1 — Form 4 signed signals (US tickers; NaN otherwise)
+    form4_dollar_30 = row.get("insider_net_dollar_30d")
+    cluster_n = row.get("cluster_buyers_30d")
 
-    if all(pd.isna(v) for v in (insider_z, promoter_chg, block_net, fii_dii_z)):
+    if all(pd.isna(v) for v in (insider_z, promoter_chg, block_net, fii_dii_z,
+                                  form4_dollar_30, cluster_n)):
         return _NEUTRAL
 
     s = _NEUTRAL
@@ -462,6 +470,26 @@ def _score_insider(row: pd.Series) -> float:
         # every ticker. +/- 2 z-units = +/- 6 points.
         contrib = float(np.clip(float(fii_dii_z) * 3, -6, 6))
         s += contrib
+    # Phase 25.1 — SEC Form 4 signed dollars. Insider buying is the
+    # stronger signal (executives selling near vest is routine; them
+    # buying with their own cash is rare and meaningful). Asymmetric
+    # weighting: caps at +/-12 with stronger upside reward.
+    if pd.notna(form4_dollar_30):
+        # 1M USD net buy = +6 points, capped at +/-12. Selling capped
+        # at -8 (penalize less because routine).
+        v = float(form4_dollar_30)
+        if v > 0:
+            contrib = float(np.clip(v / 1e5 * 0.6, 0, 12))
+        else:
+            contrib = float(np.clip(v / 1e5 * 0.4, -8, 0))
+        s += contrib
+    if pd.notna(cluster_n):
+        # Cohen-Malloy-Pomorski cluster: 3+ distinct insiders buying in
+        # 30d is the documented alpha signal. Cap at +10 for 5+ buyers.
+        n = int(cluster_n)
+        if n >= 3:
+            contrib = float(np.clip((n - 2) * 3.5, 0, 10))
+            s += contrib
 
     return float(np.clip(s, 0, 100))
 
@@ -482,6 +510,8 @@ def _score_earnings_momentum(row: pd.Series) -> float:
       earnings_growth        YoY earnings growth (decimal)
       eps_revision_3m        analyst consensus 3-month revision (decimal)
       surprise_pct           latest earnings surprise vs consensus (decimal)
+      earnings_sentiment_z_30d   Phase 25.1 — z-score of earnings-tagged
+                                  news sentiment over trailing 30 days
 
     Graceful degradation: returns neutral 50 if no input is available.
     """
@@ -491,8 +521,9 @@ def _score_earnings_momentum(row: pd.Series) -> float:
     eg = row.get("earnings_growth")
     rev = row.get("eps_revision_3m")
     sur = row.get("surprise_pct")
+    es_z = row.get("earnings_sentiment_z_30d")
 
-    if all(pd.isna(v) for v in (rg, eg, rev, sur)):
+    if all(pd.isna(v) for v in (rg, eg, rev, sur, es_z)):
         return _NEUTRAL
 
     s = _NEUTRAL
@@ -517,6 +548,11 @@ def _score_earnings_momentum(row: pd.Series) -> float:
     if pd.notna(sur):
         # Earnings surprise: +/- 10% beat = +/- 8 points
         contrib = float(np.clip(float(sur) * 80, -8, 8))
+        s += contrib
+    if pd.notna(es_z):
+        # Phase 25.1 — earnings-news sentiment z-score: +/- 2 z = +/- 8 points.
+        # Smaller weight than fundamentals because news sentiment is noisier.
+        contrib = float(np.clip(float(es_z) * 4, -8, 8))
         s += contrib
 
     return float(np.clip(s, 0, 100))
@@ -590,6 +626,16 @@ def score_row(row: pd.Series, *, regime: str, asset_class: str,
              + w_rs * rs
              + w_ins * ins
              + w_em * em)
+    # Phase 24.22 — defensive normalization. If the weights from rubric.yaml
+    # don't sum to 1 (operator typo, missing pillar, etc.) `total` can drift
+    # outside [0, 100] even though every pillar is clipped. Renormalize so
+    # the downstream direction thresholds and gate.apply() comparisons stay
+    # on the documented 0-100 scale.
+    w_sum = (weights["technical"] + weights["fundamental"] + weights["sentiment"]
+             + weights["macro"] + w_micro + w_oi + w_rs + w_ins + w_em)
+    if w_sum > 0 and abs(w_sum - 1.0) > 1e-6:
+        total = total / w_sum
+    total = max(0.0, min(100.0, float(total)))
 
     direction = 0
     if total >= min_conv and regime in ("bull", "chop"):
