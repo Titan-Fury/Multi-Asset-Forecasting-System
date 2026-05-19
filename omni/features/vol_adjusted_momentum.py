@@ -16,9 +16,17 @@ import pandas as pd
 def add_vol_adjusted_momentum(df: pd.DataFrame) -> pd.DataFrame:
     """Add ``mom_vol_adj_20d`` and ``mom_vol_adj_60d`` features.
 
-    Definition: ``ret_Hd / realized_vol_Hd`` — sometimes called the t-stat
-    of recent return. Higher means a steadier uptrend, not just a lucky one.
-    Robust to NaN: inputs missing -> output NaN.
+    Definition: ``ret_Hd / sigma_Hd`` — a t-stat of recent return. Higher
+    means a steadier uptrend, not just a lucky one. Robust to NaN: inputs
+    missing -> output NaN.
+
+    Phase 24.22 — fixes a dimensional bug. ``vol_20`` from technical.py is
+    the ANNUALISED daily-return std (sqrt(252) * daily_std). Dividing
+    a 20-day cumulative return by the annualised std gives a number whose
+    magnitude is ~sqrt(20/252)x what a real t-stat would be, so trees that
+    split on the value can't compare it across horizons or to fixed
+    thresholds. We now de-annualise the denominator to match the
+    horizon: ``sigma_H = annualised_sigma * sqrt(H / 252)``.
     """
     if df is None or df.empty:
         return df
@@ -30,14 +38,18 @@ def add_vol_adjusted_momentum(df: pd.DataFrame) -> pd.DataFrame:
                   else "vol_20" if "vol_20" in out.columns else None)
 
     if "ret_20d" in out.columns and vol20_col:
-        denom = out[vol20_col].replace(0, np.nan)
+        # De-annualise to a 20-day-horizon sigma: ann_sigma * sqrt(20/252).
+        denom = (out[vol20_col] * np.sqrt(20.0 / 252.0)).replace(0, np.nan)
         out["mom_vol_adj_20d"] = out["ret_20d"] / denom
 
     if "ret_60d" in out.columns:
         if "realized_vol_60d" in out.columns:
+            # If a horizon-specific vol column exists, assume it is already
+            # the 60-day sigma (not annualised); use it directly.
             denom = out["realized_vol_60d"].replace(0, np.nan)
         elif vol20_col:
-            denom = (out[vol20_col] * np.sqrt(3.0)).replace(0, np.nan)
+            # De-annualise to a 60-day-horizon sigma.
+            denom = (out[vol20_col] * np.sqrt(60.0 / 252.0)).replace(0, np.nan)
         else:
             denom = None
         if denom is not None:
