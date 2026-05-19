@@ -100,15 +100,19 @@ def cached(*, ttl: int, key: str) -> Callable:
             if hit is not _MISS:
                 return hit
             # ---- singleflight: claim or wait on an inflight slot --------
+            # Ownership is a thread-local decision, NOT shared state on the
+            # slot. The previous code mutated `slot.owner` from the second
+            # thread, which could flip the first thread's ownership flag in
+            # a race and cause neither thread to compute.
             with _inflight_lock:
                 slot = _inflight.get(k)
                 if slot is None:
                     slot = _InflightSlot()
-                    slot.owner = True  # this thread owns the call
                     _inflight[k] = slot
+                    is_owner = True
                 else:
-                    slot.owner = False
-            if not slot.owner:
+                    is_owner = False
+            if not is_owner:
                 # Another thread is already running fn(...) for this key.
                 # Wait for it; on completion either re-read the cache or
                 # use the result the owner stashed on the slot.
@@ -144,11 +148,10 @@ def cached(*, ttl: int, key: str) -> Callable:
 
 
 class _InflightSlot:
-    __slots__ = ("event", "owner", "value", "error")
+    __slots__ = ("event", "value", "error")
 
     def __init__(self) -> None:
         self.event = threading.Event()
-        self.owner = False
         self.value: Any = _MISS
         self.error: BaseException | None = None
 
