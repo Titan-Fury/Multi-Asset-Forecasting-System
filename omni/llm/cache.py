@@ -27,6 +27,7 @@ class LLMCache:
     """Lazy-init diskcache wrapper. Single instance per process."""
 
     _instance: "LLMCache | None" = None
+    _lock = __import__("threading").Lock()
 
     def __init__(self) -> None:
         import diskcache
@@ -41,8 +42,13 @@ class LLMCache:
 
     @classmethod
     def get(cls) -> "LLMCache":
+        # Double-checked locking: avoid lock cost on the common hot path
+        # while still guaranteeing only one instance is constructed even
+        # under concurrent dashboard requests.
         if cls._instance is None:
-            cls._instance = LLMCache()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = LLMCache()
         return cls._instance
 
     def lookup(self, backend: str, task: str, prompt: str, params: dict | None = None) -> dict | None:
