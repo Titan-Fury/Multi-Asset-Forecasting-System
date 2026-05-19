@@ -169,6 +169,26 @@ def _new_nhits(horizon_days: int = 5):
     )
 
 
+def _new_patchtst(horizon_days: int = 5):
+    """Phase 25.1 — PatchTST sequence base. Mirrors NHITS panel-shape contract.
+
+    Default-disabled via OMNI_ENABLE_PATCHTST gate; opt in only after the
+    diagnostic shows OOF AUC >= 0.51.
+    """
+    if nf is None:
+        return None
+    try:
+        from omni.models.patchtst import PatchTSTBinaryClassifier, _PATCHTST_AVAILABLE
+    except ImportError:
+        return None
+    if not _PATCHTST_AVAILABLE:
+        return None
+    return PatchTSTBinaryClassifier(
+        horizon_days=horizon_days,
+        input_size=96, max_steps=300,
+    )
+
+
 def fit_stack(
     X: pd.DataFrame,
     y: np.ndarray,
@@ -219,9 +239,23 @@ def fit_stack(
     else:
         log.info("stack: NHITS disabled (anti-predictive in diagnostics; "
                  "set OMNI_ENABLE_NHITS=1 to re-enable)")
+    # Phase 25.1 — PatchTST sequence base. Default off; opt-in via
+    # OMNI_ENABLE_PATCHTST=1 once the diagnostic clears OOF AUC >= 0.51.
+    use_patchtst = (nf is not None and has_panel
+                     and os.environ.get("OMNI_ENABLE_PATCHTST", "0") == "1")
+    if use_patchtst:
+        base_specs["patchtst"] = lambda: _new_patchtst(horizon_days=horizon_days)
+        log.info("stack: PatchTST enabled via OMNI_ENABLE_PATCHTST=1")
 
-    medians = X.median(numeric_only=True).fillna(0.0)
-    X_filled = X.fillna(medians).fillna(0.0)
+    # Phase 24.22 — DO NOT precompute medians from the entire frame: those
+    # medians leak future-fold data into the imputation values used during
+    # OOF training of earlier folds. We still need a "global" set of medians
+    # for the FINAL fit (computed below from the full X) and as a fallback,
+    # but inside the OOF loop each fold gets fold-train medians instead.
+    # The mid-pipeline replace([+/-inf, -inf], NaN) stays here so we don't
+    # have to repeat it per fold.
+    X = X.replace([np.inf, -np.inf], np.nan)
+    medians = X.median(numeric_only=True).fillna(0.0)  # used for inference + as fallback
     feat_cols = list(X.columns)
     n = len(X)
     oof = {name: np.full(n, np.nan) for name in base_specs}
@@ -232,8 +266,15 @@ def fit_stack(
                   if has_panel else None)
 
     for k, (tr, va) in enumerate(folds):
-        Xtr = X_filled.iloc[tr].to_numpy(dtype=float)
-        Xva = X_filled.iloc[va].to_numpy(dtype=float)
+        # Phase 24.22 — fold-train medians, computed only from training rows
+        # of THIS fold so validation-fold values never leak into the impute
+        # values. Falls back to the global medians for any column that's
+        # entirely NaN within this fold (e.g. a feature that hadn't yet been
+        # backfilled at the start of the time window).
+        fold_med = X.iloc[tr].median(numeric_only=True)
+        fold_med = fold_med.fillna(medians).fillna(0.0)
+        Xtr = X.iloc[tr].fillna(fold_med).fillna(0.0).to_numpy(dtype=float)
+        Xva = X.iloc[va].fillna(fold_med).fillna(0.0).to_numpy(dtype=float)
         ytr = y[tr]; yva = y[va]
         for name, mk in base_specs.items():
             try:
@@ -241,6 +282,17 @@ def fit_stack(
                 if m is None:
                     continue
                 if name == "nhits":
+                    m.fit(
+                        Xtr, ytr,
+                        dates=dates_arr[tr], tickers=tickers_arr[tr],
+                        closes=closes_arr[tr], horizon_days=horizon_days,
+                    )
+                    oof[name][va] = m.predict_panel(
+                        dates=dates_arr[va], tickers=tickers_arr[va],
+                        closes=closes_arr[va],
+                    )
+                elif name == "patchtst":
+                    # Same panel-shape contract as NHITS.
                     m.fit(
                         Xtr, ytr,
                         dates=dates_arr[tr], tickers=tickers_arr[tr],
@@ -311,7 +363,7 @@ def fit_stack(
             m = mk()
             if m is None:
                 continue
-            if name == "nhits":
+            if name in ("nhits", "patchtst"):
                 m.fit(
                     X_filled.to_numpy(dtype=float), y,
                     dates=dates_arr, tickers=tickers_arr, closes=closes_arr,
