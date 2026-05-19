@@ -35,11 +35,11 @@ def read_prices(ticker: str, asset_class: str, *,
     """
     p = paths.prices_path(asset_class, ticker)
     if not p.exists():
-        return pd.DataFrame(columns=_PRICE_COLS)
+        cols = list(columns) if columns else _PRICE_COLS
+        return pd.DataFrame(columns=cols)
     df = pd.read_parquet(p, columns=columns)
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
-    if "date" in df.columns:
         return df.sort_values("date").reset_index(drop=True)
     return df.reset_index(drop=True)
 

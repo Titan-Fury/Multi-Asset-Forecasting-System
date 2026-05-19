@@ -86,7 +86,7 @@ def _yf_symbol(asset_class: str, ticker: str) -> str:
     if asset_class == "india" and is_bse_only(ticker):
         return f"{ticker}.BO"
     suffix_map = {"india": ".NS", "us": "", "crypto": "-USD", "fx": "=X"}
-    return f"{ticker}{suffix_map[asset_class]}"
+    return f"{ticker}{suffix_map.get(asset_class, '')}"
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10), reraise=True)
@@ -133,6 +133,7 @@ def _fetch_ccxt(ticker: str, start: str, end: str, exchange: str = "binance") ->
 def fetch_prices(asset_class: str, ticker: str, *, start: str, end: str) -> pd.DataFrame:
     """Fetch OHLCV for a single (asset_class, ticker). Tries primary, falls back on empty/error."""
     df: pd.DataFrame
+    actual_source = "yfinance"
     if asset_class == "crypto":
         # Phase 24.21 — short-circuit straight to yfinance when ccxt isn't
         # installed instead of attempting + warning + retrying. Was emitting
@@ -141,13 +142,17 @@ def fetch_prices(asset_class: str, ticker: str, *, start: str, end: str) -> pd.D
         if _HAS_CCXT:
             try:
                 df = _fetch_ccxt(ticker, start, end)
+                actual_source = "ccxt"
             except Exception as e:
                 log.warning(f"ccxt failed for {ticker}: {e}; falling back to yfinance")
                 df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
+                actual_source = "yfinance"
         else:
             df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
+            actual_source = "yfinance"
     else:
         df = _fetch_yfinance(_yf_symbol(asset_class, ticker), start, end)
+        actual_source = "yfinance"
         # India small/mid caps can be listed only on BSE in Yahoo. If the
         # NSE suffix returns no rows OR a suspiciously thin result (<30
         # trading days, the typical "delisted phantom" Yahoo emits for
@@ -164,7 +169,7 @@ def fetch_prices(asset_class: str, ticker: str, *, start: str, end: str) -> pd.D
 
     df["ticker"] = ticker
     df["asset_class"] = asset_class
-    df["source"] = "yfinance" if asset_class != "crypto" else "ccxt"
+    df["source"] = actual_source
     df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
     # yfinance inserts a placeholder row for *today* with NaN OHLC until the
     # session closes. Drop any trailing NaN-close rows so feature engineering
