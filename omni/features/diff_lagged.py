@@ -78,10 +78,23 @@ def add_diff_and_lagged(out: pd.DataFrame, *,
 
     if "adj_close" in out.columns:
         ac = out["adj_close"].astype(float)
-        out["delta_close_5d"] = ac - ac.shift(5)
-        out["delta_close_20d"] = ac - ac.shift(20)
-    if "atr_14" in out.columns:
-        a = out["atr_14"].astype(float)
+        # Phase 24.22 — express as PERCENTAGE delta, not raw rupee delta.
+        # The previous version emitted absolute price differences which are
+        # not ticker-invariant: a Rs 5 move is huge for a Rs 50 stock and
+        # nothing for a Rs 5000 stock, but the model receives the same
+        # value. With a ticker-invariant denominator the feature works
+        # cross-sectionally and trees can split meaningfully.
+        prev5 = ac.shift(5)
+        prev20 = ac.shift(20)
+        out["delta_close_5d"] = (ac - prev5) / prev5.replace(0, np.nan)
+        out["delta_close_20d"] = (ac - prev20) / prev20.replace(0, np.nan)
+    # Phase 24.22 — was looking for `atr_14` but technical.py emits
+    # `atr_pct_14` (the normalised version) so the branch was dead and
+    # `delta_atr_5d` was always NaN. Use the normalised column.
+    atr_col = "atr_pct_14" if "atr_pct_14" in out.columns else (
+        "atr_14" if "atr_14" in out.columns else None)
+    if atr_col is not None:
+        a = out[atr_col].astype(float)
         out["delta_atr_5d"] = a - a.shift(5)
     if "rsi_14" in out.columns:
         r = out["rsi_14"].astype(float)
