@@ -200,7 +200,15 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
 
                 def predict_proba(self, X):
                     raw = self.clf.predict_proba(X)[:, 1]
-                    return self.cal.predict_proba(raw)
+                    p = self.cal.predict_proba(raw)
+                    # Phase 24.22 — guarantee a 2-D (N, 2) output. The caller
+                    # at line 213 indexes [:, 1] which raises IndexError if a
+                    # beta-calibrator implementation returns the positive
+                    # probability as a 1-D array. Normalise both shapes here.
+                    p = np.asarray(p)
+                    if p.ndim == 1:
+                        return np.column_stack([1.0 - p, p])
+                    return p
 
             cal = _BetaCalProxy(clf, cal)
         else:
