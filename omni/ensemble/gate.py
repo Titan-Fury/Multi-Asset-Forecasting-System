@@ -117,7 +117,12 @@ def apply(df: pd.DataFrame, *, cfg: GateConfig | None = None,
     out = df.copy()
     n = len(out)
 
-    dir_ok = out["direction"] != 0
+    # Phase 24.22 — `direction` may be NaN when proba_up upstream was NaN
+    # (model predict failure). NaN != 0 evaluates to True in pandas, so the
+    # naked `out["direction"] != 0` was letting NaN-direction rows through
+    # the dir_ok gate. Explicit notna() check fixes that.
+    dir_col = out["direction"]
+    dir_ok = dir_col.notna() & (dir_col != 0)
     ticker_ok = ~out["ticker"].astype(str).isin(set(cfg.blocked_tickers))
 
     # Compute the per-row regime-direction multiplier (1.0 when filter is off
@@ -128,7 +133,12 @@ def apply(df: pd.DataFrame, *, cfg: GateConfig | None = None,
             # Phase 25 / Optimization: vectorize the (regime, direction)
             # lookup via pd.Series.map() over a tuple-keyed dict instead
             # of looping with regime_dir_multiplier per row.
-            keys = list(zip(rg, out["direction"].astype(int)))
+            # Phase 24.22 — fillna(0) so NaN direction maps to multiplier 1.0
+            # (the default) without raising on .astype(int). dir_ok above
+            # already blocks the row from passing the gate so the multiplier
+            # value is never actually used for those rows.
+            dir_safe = dir_col.fillna(0).astype(int)
+            keys = list(zip(rg, dir_safe))
             mult = pd.Series(
                 [_REGIME_DIR_MULT_DEFAULT.get(k, 1.0) for k in keys],
                 index=out.index, dtype=float,
