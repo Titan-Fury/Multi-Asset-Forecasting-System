@@ -90,6 +90,27 @@ def build_for_ticker(asset_class: str, ticker: str,
     out["asset_class"] = asset_class
     out["date"] = pd.to_datetime(out["date"])
 
+    # Phase 24.22 — per-row circuit-history features.
+    # Computes a parallel column for every bar so the trained
+    # `circuit_risk` model can see the streak natively after retrain
+    # (without these the model is blind to chronic-LC stocks because
+    # ATR/vol features collapse on locked bars). Reads OHLC straight
+    # from `prices` since `tech` already drops the level columns.
+    try:
+        from omni.features.circuit import add_circuit_features
+        ohlc_cols = [c for c in ("date", "open", "high", "low", "close",
+                                  "adj_close") if c in prices.columns]
+        if ohlc_cols and "date" in ohlc_cols:
+            ch = add_circuit_features(prices[ohlc_cols].copy(),
+                                       asset_class=asset_class)
+            ch_cols = [c for c in ch.columns
+                        if c not in ("open", "high", "low", "close", "adj_close")]
+            ch = ch[ch_cols]
+            ch["date"] = pd.to_datetime(ch["date"])
+            out = out.merge(ch, on="date", how="left")
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"circuit features skipped for {ticker}: {e}")
+
     # Fundamentals (latest <= date per row, only equities)
     if asset_class not in ("crypto", "fx") and fundamentals is not None and not fundamentals.empty:
         f = fundamentals[fundamentals["ticker"] == ticker].copy()

@@ -18,6 +18,9 @@ Features produced:
   macd_pct, macd_signal_pct, macd_hist_pct              (MACD divided by close)
   bb_pctb                                                (already %-based)
   atr_pct_14                                             (atr_14 / close)
+  atr_pct_14_unlocked                                    (ATR over unlocked bars only)
+  parkinson_vol_20                                       (range-based, locked-bar-safe)
+  gk_vol_20                                              (Garman-Klass, locked-bar-safe)
   adx_14                                                 (already 0-100)
   obv_z_60d                                              (rolling z-score of OBV)
   vol_5, vol_20, vol_ratio                               (annualized log-ret std)
@@ -95,6 +98,62 @@ def compute(prices: pd.DataFrame) -> pd.DataFrame:
     tr = pd.concat([h - l, (h - prev_close).abs(), (l - prev_close).abs()], axis=1).max(axis=1)
     atr_14 = tr.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
     out["atr_pct_14"] = _safe_div(atr_14, c)
+
+    # Phase 24.22 — locked-bar-corrected vol estimators.
+    # On NSE circuit days the bar high == low (range=0) and the daily return
+    # is clipped at the circuit threshold. Wilder ATR averages those zeros
+    # in, so a chronic-LC stock looks artificially calm. Two complementary
+    # fixes go in here:
+    #
+    #   1. atr_pct_14_unlocked
+    #        ATR-14 EWM that ignores locked bars entirely (NaN-skipping
+    #        EWM). For a stock that hits LC every other day, this stays
+    #        anchored on the unlocked sessions' true range.
+    #
+    #   2. parkinson_vol_20  /  gk_vol_20
+    #        Range-based vol estimators (Parkinson 1980, Garman-Klass 1980).
+    #        Both vanish to 0 on locked bars (ln(H/L)==0), but we substitute
+    #        the squared close-to-close return (ln(C/C[-1])^2) which IS the
+    #        only price-discovery signal available on a locked bar. This
+    #        keeps the rolling variance honest.
+    #
+    # Range==0 is a strict superset of "circuit-locked" — also catches
+    # data-quality flat days. That's the right behaviour: any zero-range
+    # bar lacks intraday discovery and should defer to the c-c fallback.
+    locked_zero_range = (h - l).abs() < 1e-12
+    tr_unlocked = tr.where(~locked_zero_range)
+    atr_14_unlocked = tr_unlocked.ewm(
+        alpha=1 / 14, min_periods=14, adjust=False, ignore_na=True,
+    ).mean()
+    out["atr_pct_14_unlocked"] = _safe_div(atr_14_unlocked, c)
+
+    # Parkinson + Garman-Klass with locked-bar fallback.
+    # log(H/L) and log(C/O) are both zero when the bar is range-locked;
+    # we substitute the squared close-to-close log return to keep the
+    # variance signal alive on circuit days.
+    h_safe = h.replace(0, np.nan)
+    l_safe = l.replace(0, np.nan)
+    o = df["open"].astype(float).replace(0, np.nan)
+    ln_hl = np.log(h_safe / l_safe).fillna(0.0)
+    ln_co = np.log(c / o).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    ln_cc = np.log(ac / ac.shift(1))
+
+    pk = (ln_hl ** 2) / (4 * np.log(2))
+    gk = 0.5 * (ln_hl ** 2) - (2 * np.log(2) - 1) * (ln_co ** 2)
+
+    fallback = ln_cc ** 2
+    pk = pk.where(~locked_zero_range, fallback)
+    gk = gk.where(~locked_zero_range, fallback)
+    # Negative gk values are possible numerically when ln_co is large vs
+    # ln_hl; clip at zero so sqrt is well-defined.
+    gk = gk.clip(lower=0.0)
+
+    out["parkinson_vol_20"] = np.sqrt(
+        252.0 * pk.rolling(20, min_periods=20).mean()
+    )
+    out["gk_vol_20"] = np.sqrt(
+        252.0 * gk.rolling(20, min_periods=20).mean()
+    )
 
     # ADX 14 (already 0-100, ticker-invariant)
     up_move = h - h.shift(1)

@@ -191,4 +191,33 @@ def aggregate(scored: pd.DataFrame, *, ticker_col: str = "ticker_hint") -> pd.Da
            .transform(lambda s: s - s.shift(1).rolling(7, min_periods=2).mean())
     )
     agg["date"] = pd.to_datetime(agg["date"])
+
+    # Phase 24.22 — Twitter / X side-channel features.
+    # When Apify Twitter ingest is enabled, the rows arrive with
+    # `source == "twitter"`. We compute a Twitter-only daily sentiment
+    # so the model can separate retail-FinTwit signal from formal news
+    # (often it leads news by hours and is more reactive in panic regimes).
+    # Columns are NaN for tickers with no twitter coverage that day; the
+    # downstream feature builder treats NaN as "no signal" rather than 0.
+    if "source" in df.columns:
+        tw_mask = df["source"].astype(str).str.lower() == "twitter"
+        if tw_mask.any():
+            tw = df[tw_mask].copy()
+            tw_grp = tw.groupby(["ticker", "date"])
+            tw_agg = pd.DataFrame({
+                "twitter_n_24h": tw_grp.size(),
+                "twitter_sent_mean_24h": tw_grp["sent_score"].mean(),
+                "twitter_sent_std_24h": tw_grp["sent_score"].std(ddof=0),
+            }).reset_index()
+            tw_agg["date"] = pd.to_datetime(tw_agg["date"])
+            agg = agg.merge(tw_agg, on=["ticker", "date"], how="left")
+        else:
+            agg["twitter_n_24h"] = 0
+            agg["twitter_sent_mean_24h"] = pd.NA
+            agg["twitter_sent_std_24h"] = pd.NA
+    else:
+        agg["twitter_n_24h"] = 0
+        agg["twitter_sent_mean_24h"] = pd.NA
+        agg["twitter_sent_std_24h"] = pd.NA
+
     return agg
