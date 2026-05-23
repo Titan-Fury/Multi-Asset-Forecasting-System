@@ -296,26 +296,51 @@ def _score_one(feat_only: pd.DataFrame,
             log.warning(f"stack score failed: {exc}")
 
     # Phase 25 / Commit E — regime-conditional stack routing. When the
-    # bundle is loaded (OMNI_REGIME_STACKS=1) and any sub-stack has a
-    # better OOF AUC than what we picked above, blend predictions by
-    # the HMM's per-state posterior and use that as the new score.
+    # bundle is loaded (OMNI_REGIME_STACKS=1) we **blend** the regime-stack
+    # score with whatever was picked above, weighting by AUC edge over 0.5
+    # (Bayesian model averaging by skill). The earlier "only swap if strictly
+    # better OOF AUC" gate was too coarse — regime stacks specialise per
+    # regime, so their average OOF AUC across all rows is usually below the
+    # universal stack's, but they still add information conditional on the
+    # current regime.
     if regime_stacks is not None:
         try:
-            best_rs_auc = max(regime_stacks.oof_aucs.values()) if regime_stacks.oof_aucs else 0.0
             uni_auc = float(universal.oof_auc or 0.5) if universal is not None else 0.5
-            existing = float(stack_rec.oof_meta_auc) if stack_rec is not None else uni_auc
-            if best_rs_auc > existing:
+            existing_auc = float(stack_rec.oof_meta_auc) if stack_rec is not None else uni_auc
+            # Resolve the regime AUC most relevant to current state
+            if regime_proba:
+                # Posterior-weighted regime AUC
+                rs_auc = sum(regime_stacks.oof_aucs.get(lbl, 0.5) * float(p)
+                             for lbl, p in regime_proba.items())
+            elif regime_label and regime_label in regime_stacks.oof_aucs:
+                rs_auc = float(regime_stacks.oof_aucs[regime_label])
+            else:
+                rs_auc = float(np.mean(list(regime_stacks.oof_aucs.values())))
+
+            # AUC edge over random; clip negative to 0 so a sub-coin-flip
+            # regime can't pull predictions in the wrong direction.
+            edge_rs = max(0.0, rs_auc - 0.5)
+            edge_ex = max(0.0, existing_auc - 0.5)
+            denom = edge_rs + edge_ex
+            if denom > 1e-6:
+                w_rs = edge_rs / denom
+            else:
+                w_rs = 0.0  # both at chance — keep existing
+
+            if w_rs > 0.0:
                 Xrs = feat_only.reindex(columns=regime_stacks.feature_cols)
                 p_rs = float(regime_stacks.predict_proba(
                     Xrs, regime_proba=regime_proba, regime_label=regime_label,
                 )[0])
-                proba = p_rs
-                # Encode which regime weights actually contributed
-                if regime_proba:
-                    top = max(regime_proba.items(), key=lambda kv: kv[1])[0]
-                    kind = f"regime_stack[{top}]"
-                else:
-                    kind = f"regime_stack[{regime_label or 'uniform'}]"
+                old_proba = proba
+                proba = w_rs * p_rs + (1.0 - w_rs) * proba
+                top = (max(regime_proba.items(), key=lambda kv: kv[1])[0]
+                       if regime_proba else (regime_label or "uniform"))
+                kind = f"regime_blend[{top},w={w_rs:.2f}]"
+                log.info(
+                    f"regime_stacks blend: rs_auc={rs_auc:.3f} ex_auc={existing_auc:.3f} "
+                    f"w_rs={w_rs:.2f} p_rs={p_rs:.3f} prev={old_proba:.3f} -> {proba:.3f}"
+                )
         except Exception as exc:  # noqa: BLE001
             log.warning(f"regime_stacks score failed: {exc}")
 
