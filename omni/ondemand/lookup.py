@@ -366,11 +366,34 @@ def _aggregate_sentiment(news: pd.DataFrame, ticker: str) -> pd.DataFrame:
 # ---------- public ----------
 
 def lookup_ticker(ticker: str, asset_class: str,
-                  *, display_name: str | None = None) -> LookupBundle | None:
-    """End-to-end fetch for one ticker. Returns None if no prices available."""
+                  *, display_name: str | None = None,
+                  force_fresh: bool = False) -> LookupBundle | None:
+    """End-to-end fetch for one ticker. Returns None if no prices available.
+
+    Phase 24.22 — when ``force_fresh=True``, every cached entry that
+    mentions this ticker (prices, fundamentals, news, prediction card,
+    deep card) is purged BEFORE the network fan-out. Use this for
+    "predict tomorrow" runs after market close so the cache TTLs (4h
+    prices, 30min news) don't serve stale snapshots from earlier today.
+    """
     display_name = display_name or ticker
     prov = Provenance()
     asof = pd.Timestamp.now().normalize()
+
+    # Phase 24.22 — force-fresh path: drop ALL cache entries that mention
+    # this ticker so the live fetch path is guaranteed to re-pull
+    # prices/news/fundamentals from the source rather than serving the
+    # last cached frame.
+    if force_fresh:
+        try:
+            from omni.ondemand.cache import purge_ticker as _purge
+            n = _purge(ticker)
+            log.info(f"force_fresh[{ticker}]: purged {n} cache entries")
+            # Also drop the negative-cache entry so a name that previously
+            # failed gets a real second look.
+            _negative_cache.pop((asset_class, ticker.upper()), None)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"force_fresh purge failed for {ticker}: {exc}")
 
     # Phase 24.21 — short-circuit for tickers we've already proven invalid in
     # the last 24h. Avoids both the wasted network fan-out and the repeating
