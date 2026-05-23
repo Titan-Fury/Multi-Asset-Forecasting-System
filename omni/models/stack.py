@@ -113,10 +113,16 @@ class StackResult:
 def _new_xgb():
     import xgboost as xgb
     import os
+    # Phase 24.22 — same hyperparameter overhaul as xgboost_5d:
+    # - learning_rate 0.05 -> 0.03 with n_estimators 400 -> 800
+    # - min_child_weight 1 -> 5, reg_alpha 0 -> 0.5
+    # The stack picks up the new circuit-history features from the
+    # universal feature catalog automatically once retrained.
     kwargs = dict(
-        n_estimators=400, max_depth=5, learning_rate=0.05,
+        n_estimators=800, max_depth=5, learning_rate=0.03,
         subsample=0.85, colsample_bytree=0.85,
-        reg_lambda=1.0, tree_method="hist",
+        min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
+        tree_method="hist",
         eval_metric="auc", n_jobs=-1, verbosity=0,
     )
     if os.environ.get("OMNI_XGB_DEVICE", "").strip().lower() in ("cuda", "gpu"):

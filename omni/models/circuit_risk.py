@@ -35,9 +35,18 @@ from omni.utils.logger import log
 # Features are price + microstructure + (optional) narrative sentiment.
 # All ticker-invariant by Phase 24.17 normalization. The order here is
 # also the inference-time alignment order — keep stable.
+#
+# Phase 24.22 additions: explicit circuit-history columns + locked-bar-
+# corrected vol estimators. Older trained models that don't carry these
+# features in their `feature_cols` will continue to work via reindex
+# (the new columns are simply ignored). After a retrain the model can
+# learn the chronic-LC streak signal natively rather than relying on
+# the inference-time deterministic override in predict.py.
 _DEFAULT_FEATS = (
     # Distance / volatility
-    "dist_from_52w_low", "dist_from_52w_high", "atr_pct_14",
+    "dist_from_52w_low", "dist_from_52w_high",
+    "atr_pct_14", "atr_pct_14_unlocked",
+    "parkinson_vol_20", "gk_vol_20",
     "vol_5", "vol_20", "vol_ratio",
     # Recent returns
     "ret_1d", "ret_5d", "ret_20d",
@@ -49,6 +58,13 @@ _DEFAULT_FEATS = (
     # Narrative (Phase 24.18 — may be NaN if news pipeline is offline)
     "panic_keyword_ratio", "news_volume_z_60d",
     "promoter_news_flag", "sebi_action_flag",
+    # Phase 24.22 — circuit-history features. The model can now see the
+    # streak directly instead of relying on the inference-time override.
+    "is_circuit_bar",
+    "circuit_hits_5d", "circuit_hits_20d", "circuit_hits_60d",
+    "circuit_lower_hits_20d", "circuit_upper_hits_20d",
+    "consecutive_lock_days", "days_since_last_lock",
+    "last_lock_direction_signed",
 )
 
 
@@ -178,6 +194,37 @@ def fit(df_full: pd.DataFrame, *,
         f"base_rate={base_rate:.4f} scale_pos_weight={spw:.2f} feats={len(feats)}"
     )
 
+    # Phase 24.22 — magnitude-aware sample weights for circuit-risk too.
+    # |fwd_ret_5d| weights focus the binary objective on bars where the
+    # actual realised drawdown was material. Falls back to uniform if
+    # the column isn't present (e.g. live inference frame).
+    sw = None
+    fwd_col = f"fwd_ret_{horizon}d"
+    if fwd_col in df.columns:
+        r = pd.to_numeric(df[fwd_col], errors="coerce").fillna(0.0).abs().to_numpy()
+        sw = 0.25 + 4.0 * np.clip(r, 0.0, 0.50)
+
+    # Phase 24.22 — monotone constraints aligned to `feats` order. Even
+    # with limited positives, the trees can never learn the wrong sign
+    # on these features. Lower-circuit history MUST predict more circuits
+    # in the future, not fewer.
+    mono_rules = {
+        "circuit_lower_hits_5d": +1,    # more LC hits -> higher circuit risk
+        "circuit_lower_hits_20d": +1,
+        "circuit_hits_5d": +1,
+        "circuit_hits_20d": +1,
+        "circuit_hits_60d": +1,
+        "consecutive_lock_days": +1,
+        "is_circuit_bar": +1,
+        "panic_keyword_ratio": +1,
+        "sebi_action_flag": +1,
+        # Vol estimators: higher historical vol -> higher tail risk
+        "atr_pct_14_unlocked": +1,
+        "parkinson_vol_20": +1,
+        "gk_vol_20": +1,
+    }
+    monotone = tuple(mono_rules.get(c, 0) for c in feats)
+
     # OOF eval via purged K-fold + embargo (same as stack). Phase 24.18 —
     # per-ticker purging via the `tickers` arg.
     folds = purged_kfold_indices(
@@ -189,13 +236,18 @@ def fit(df_full: pd.DataFrame, *,
     fold_pr: list[float] = []
     for k, (tr, va) in enumerate(folds):
         m = xgb.XGBClassifier(
-            n_estimators=400, max_depth=5, learning_rate=0.05,
-            subsample=0.85, colsample_bytree=0.85, reg_lambda=1.0,
+            n_estimators=800, max_depth=5, learning_rate=0.03,
+            subsample=0.85, colsample_bytree=0.85,
+            min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
             tree_method="hist", eval_metric="aucpr",
             scale_pos_weight=spw, n_jobs=-1, verbosity=0,
+            monotone_constraints=monotone,
         )
         try:
-            m.fit(X_filled.iloc[tr].to_numpy(dtype=float), y[tr])
+            fit_kwargs = {}
+            if sw is not None:
+                fit_kwargs["sample_weight"] = sw[tr]
+            m.fit(X_filled.iloc[tr].to_numpy(dtype=float), y[tr], **fit_kwargs)
             p = m.predict_proba(X_filled.iloc[va].to_numpy(dtype=float))[:, 1]
             oof[va] = p
             if y[va].sum() > 0:
@@ -211,12 +263,15 @@ def fit(df_full: pd.DataFrame, *,
 
     # Final fit on full data
     final = xgb.XGBClassifier(
-        n_estimators=400, max_depth=5, learning_rate=0.05,
-        subsample=0.85, colsample_bytree=0.85, reg_lambda=1.0,
+        n_estimators=800, max_depth=5, learning_rate=0.03,
+        subsample=0.85, colsample_bytree=0.85,
+        min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
         tree_method="hist", eval_metric="aucpr",
         scale_pos_weight=spw, n_jobs=-1, verbosity=0,
+        monotone_constraints=monotone,
     )
-    final.fit(X_filled.to_numpy(dtype=float), y)
+    final_fit_kwargs = {"sample_weight": sw} if sw is not None else {}
+    final.fit(X_filled.to_numpy(dtype=float), y, **final_fit_kwargs)
 
     log.info(
         f"circuit_risk: OOF PR-AUC={pr_auc:.4f} (vs base_rate={base_rate:.4f}, "

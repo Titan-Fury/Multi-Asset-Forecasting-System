@@ -121,6 +121,60 @@ class WalkForwardResult:
         return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
+def _build_monotone_constraints(feat_cols: Iterable[str]) -> tuple[int, ...]:
+    """Return positional XGBoost monotone_constraints tuple aligned to
+    `feat_cols` order. Only the features whose sign is unambiguous get
+    constrained; everything else stays at 0 (unconstrained).
+
+    Phase 24.22 — architectural insurance against the CIANAGRO
+    failure mode. Even with limited training data the trees can never
+    learn the wrong sign on these features.
+    """
+    rules: dict[str, int] = {
+        # Lower-circuit pressure: more hits / direction toward downside =>
+        # lower probability that the next 5 days are positive.
+        "circuit_lower_hits_5d": -1,
+        "circuit_lower_hits_20d": -1,
+        # Upper-circuit demand: more hits => higher probability of continuation.
+        "circuit_upper_hits_20d": +1,
+        # Narrative distress signals.
+        "panic_keyword_ratio": -1,
+        "sebi_action_flag": -1,
+    }
+    return tuple(rules.get(c, 0) for c in feat_cols)
+
+
+def _magnitude_weights(df: pd.DataFrame, *, target: str) -> np.ndarray | None:
+    """Build per-row sample weights proportional to |realised forward return|.
+
+    Phase 24.22 — focuses XGBoost on the days that mattered. A trading
+    signal that flips sign correctly on a +0.1% bar costs nothing in the
+    real world; flipping correctly on a -8% bar is the entire game.
+    Without this weighting the binary objective treats both equally.
+
+    Falls back to None (uniform weighting) when fwd_ret_<H>d isn't in
+    the frame, so existing callers that don't provide it still work.
+    """
+    h = "5"
+    if target.endswith("d") and target.startswith("fwd_dir_"):
+        # extract horizon from fwd_dir_<H>d
+        try:
+            h = target[len("fwd_dir_"):-len("d")] or "5"
+        except Exception:  # noqa: BLE001
+            h = "5"
+    ret_col = f"fwd_ret_{h}d"
+    if ret_col not in df.columns:
+        return None
+    r = pd.to_numeric(df[ret_col], errors="coerce").fillna(0.0).abs().to_numpy()
+    # Clip extreme outliers (data errors) so they don't dominate the loss.
+    # 25% in 5 trading days is already an extraordinary move; cap at 50%.
+    r = np.clip(r, 0.0, 0.50)
+    # Add a small floor so sub-percent moves still contribute to learning
+    # the bulk of the distribution.
+    w = 0.25 + 4.0 * r
+    return w
+
+
 def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
                     n_folds: int = 5, min_train: int = 504,
                     inner_val_frac: float = 0.2,
@@ -149,11 +203,24 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
                if "ticker" in df.columns
                else pd.Series(["__single__"] * len(X), index=X.index))
 
+    # Phase 24.22 — magnitude-aware sample weights (focus on bars that move).
+    full_weights = _magnitude_weights(df.loc[X.index].copy(), target=target)
+
+    # Phase 24.22 — hyperparameter overhaul:
+    #  - learning_rate 0.05 -> 0.03 with proportional n_estimators bump
+    #    (slower commitment, better generalisation on small training subsets)
+    #  - min_child_weight 1 -> 5 (stop the tree splitting on noise rows;
+    #    helps on sparse distressed-name data)
+    #  - reg_alpha 0 -> 0.5 (L1; ignores noise features as catalogue grew)
+    #  - monotone_constraints (architectural insurance against wrong-sign
+    #    learning on the circuit-distress features)
     params = dict(
-        n_estimators=400, max_depth=5, learning_rate=0.05,
+        n_estimators=800, max_depth=5, learning_rate=0.03,
         subsample=0.8, colsample_bytree=0.8,
+        min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
         objective="binary:logistic", eval_metric="logloss",
         tree_method="hist", random_state=42,
+        monotone_constraints=_build_monotone_constraints(feat_cols),
     )
     # Phase 22 — opt-in GPU: set OMNI_XGB_DEVICE=cuda to use the local GPU.
     # Defaults to CPU so existing CI / non-GPU envs keep working.
@@ -162,6 +229,8 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     if _dev in ("cuda", "gpu"):
         params["device"] = "cuda"
     if xgb_params:
+        # Caller-provided overrides win; if they pass their own
+        # monotone_constraints we honour theirs verbatim.
         params.update(xgb_params)
 
     res = WalkForwardResult(feature_cols=feat_cols)
@@ -176,7 +245,10 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         Xs, ys = X.iloc[te_idx], y.iloc[te_idx]
 
         clf = XGBClassifier(**params)
-        clf.fit(Xt.values, yt.values, verbose=False)
+        fit_kwargs: dict = {"verbose": False}
+        if full_weights is not None:
+            fit_kwargs["sample_weight"] = full_weights[inner_train]
+        clf.fit(Xt.values, yt.values, **fit_kwargs)
 
         # Phase 25 — env-controlled calibration: OMNI_CAL_METHOD=beta opts
         # into Kull-Filho-Flach beta calibration. Default (isotonic) keeps
