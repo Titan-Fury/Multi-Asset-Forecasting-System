@@ -111,11 +111,53 @@ def _fmt_abs(last: float, prev: float) -> tuple[str, int]:
 
 @st.cache_data(ttl=300, show_spinner=False)  # refresh every 5 minutes
 def fetch_marquee_data() -> list[MarqueeItem]:
-    """Fetch live quotes for the marquee. Cached 5 min; 13 symbols ≈ 1-2s."""
+    """Fetch live quotes for the marquee. Cached 5 min; batched 1 round-trip.
+
+    Phase 24.20 — was issuing 13 sequential `yf.Ticker(sym).fast_info` calls
+    on cache miss (~3-5s wall). Now uses a single `yf.download(group_by=...)`
+    request which fetches all symbols in one HTTP round-trip (~0.5-1s) and
+    falls back to the per-symbol path only for symbols missing from the
+    batch payload (rare, e.g. delisted).
+    """
     out: list[MarqueeItem] = []
     failed = 0
+
+    # ---- single batched fetch ----
+    batch: dict[str, tuple[float, float]] = {}
+    try:
+        import yfinance as yf
+        symbols = [s for s, _, _ in _TICKERS]
+        df = yf.download(
+            tickers=" ".join(symbols),
+            period="2d",
+            interval="1d",
+            auto_adjust=False,
+            group_by="ticker",
+            progress=False,
+            threads=True,
+            prepost=False,
+        )
+        # df shape: MultiIndex columns when multiple tickers requested.
+        for sym in symbols:
+            try:
+                if (sym,) in df.columns or sym in getattr(df.columns, "levels", [[]])[0]:
+                    sub = df[sym]["Close"].dropna()
+                    if len(sub) >= 2:
+                        batch[sym] = (float(sub.iloc[-1]), float(sub.iloc[-2]))
+                    elif len(sub) == 1:
+                        # single bar — use Open as prev proxy
+                        op = df[sym]["Open"].dropna()
+                        if len(op) >= 1:
+                            batch[sym] = (float(sub.iloc[-1]), float(op.iloc[-1]))
+            except Exception:  # noqa: BLE001
+                # per-symbol decoding failure → fall back to _safe_quote below
+                pass
+    except Exception:  # noqa: BLE001
+        # Total batch failure (network / yfinance change) → per-symbol path.
+        pass
+
     for sym, label, fmt in _TICKERS:
-        q = _safe_quote(sym)
+        q = batch.get(sym) or _safe_quote(sym)
         if q is None:
             failed += 1
             out.append(MarqueeItem(label=label, value="—", direction=0))

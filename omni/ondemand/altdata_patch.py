@@ -26,7 +26,28 @@ from omni.utils.logger import log
 
 
 def _fii_dii_z_live() -> float | None:
-    """Country-level FII+DII net flow, 20d z-score on the most recent value."""
+    """Country-level FII+DII net flow, 20d z-score on the most recent value.
+
+    Phase 25.1 — reads from the on-disk archive
+    (`omni/ondemand/fii_dii_archive.py`) which is appended daily by the
+    orchestrator. The raw NSE `fiidiiTradeReact` endpoint only returns
+    the most recent trading day, so a single live call cannot compute a
+    rolling z-score — the archive accumulates the history we need.
+
+    Falls back to the previous single-day live fetch if the archive is
+    empty (first-run bootstrap).
+    """
+    # Preferred path: read from the daily archive
+    try:
+        from omni.ondemand.fii_dii_archive import fii_dii_net_z_20d_from_history
+        z = fii_dii_net_z_20d_from_history()
+        if z is not None:
+            return z
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"fii_dii_z_live archive read failed: {exc}")
+
+    # Bootstrap fallback: single-day live fetch (will return None until
+    # the archive has 5+ sessions).
     try:
         from omni.ingest.sources.nse_flows import fii_dii_activity
         df = fii_dii_activity()
@@ -43,20 +64,31 @@ def _fii_dii_z_live() -> float | None:
             return None
         return float((d["net"].iloc[-1] - mu) / sd)
     except Exception as exc:  # noqa: BLE001
-        log.debug(f"fii_dii_z_live failed: {exc}")
+        log.debug(f"fii_dii_z_live fallback failed: {exc}")
         return None
 
 
 def _insider_net_z_20d_live(ticker: str) -> float | None:
     """20d z-score of per-ticker insider net-buy value from SEBI PIT-2015.
 
-    We approximate the z-score from a single window: the disclosures
-    pulled cover ~30 days, so we compute the daily net-buy series, then
-    z-score the latest day's value against the rolling 20d mean+std of
-    that series. When the disclosure stream is sparse (single ticker
-    typically gets a handful of filings/year), this returns None and the
-    rubric falls back to neutral.
+    Phase 25.1 — preferred path reads from
+    `omni.ondemand.deals_archive.SEBI_PATH` (accumulated by the daily
+    orchestrator). The single-day live API can't compute a 20d z-score;
+    the archive can.
+
+    Falls back to single-day live computation when the archive is empty
+    (first-run bootstrap).
     """
+    # Preferred: archive-based aggregator
+    try:
+        from omni.ondemand.deals_archive import insider_net_z_20d as _archive_z
+        z = _archive_z(ticker)
+        if z is not None:
+            return z
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"insider_net_z_20d archive read failed: {exc}")
+
+    # Bootstrap fallback (the original implementation)
     try:
         from omni.ingest.sources.sebi_insider import insider_disclosures
         df = insider_disclosures(days=30)
@@ -71,7 +103,6 @@ def _insider_net_z_20d_live(ticker: str) -> float | None:
             ttype.str.contains("buy|acqui|purchase").map({True: 1, False: 0})
             - ttype.str.contains("sell|dispos|sale").map({True: 1, False: 0})
         )
-        # Aggregate to daily
         daily = pd.DataFrame({"date": sub["date"], "v": signed_value}) \
             .groupby("date")["v"].sum().sort_index()
         if len(daily) < 5:
@@ -82,17 +113,27 @@ def _insider_net_z_20d_live(ticker: str) -> float | None:
             return None
         return float((daily.iloc[-1] - mu) / sd)
     except Exception as exc:  # noqa: BLE001
-        log.debug(f"insider_net_z_20d_live({ticker}) failed: {exc}")
+        log.debug(f"insider_net_z_20d_live({ticker}) fallback failed: {exc}")
         return None
 
 
 def _block_deal_net_cr_live(ticker: str) -> float | None:
     """Net block-deal value (INR crores) over the last 5 sessions for `ticker`.
 
-    NSE's snapshot endpoint only returns the most recent trading day,
-    so this is best-effort: when we have today's deals we return the
-    signed total; otherwise None. `value_cr = qty * avg_price / 1e7`.
+    Phase 25.1 — preferred path reads from
+    `omni.ondemand.deals_archive.BLOCK_PATH`. Falls back to single-day
+    live snapshot for first-run bootstrap.
     """
+    # Preferred: archive-based aggregator (5d trailing)
+    try:
+        from omni.ondemand.deals_archive import block_deal_net_cr_5d
+        v = block_deal_net_cr_5d(ticker)
+        if v is not None:
+            return v
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"block_deal_net_cr archive read failed: {exc}")
+
+    # Bootstrap fallback
     try:
         from omni.ingest.sources.nse_flows import block_deals
         df = block_deals()
@@ -107,7 +148,7 @@ def _block_deal_net_cr_live(ticker: str) -> float | None:
         value_cr = (sub["qty"].astype(float) * sub["avg_price"].astype(float) * sign) / 1e7
         return float(value_cr.sum())
     except Exception as exc:  # noqa: BLE001
-        log.debug(f"block_deal_net_cr_live({ticker}) failed: {exc}")
+        log.debug(f"block_deal_net_cr_live({ticker}) fallback failed: {exc}")
         return None
 
 

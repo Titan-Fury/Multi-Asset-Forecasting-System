@@ -855,6 +855,46 @@ def prediction_card(card_dict: dict) -> None:
             unsafe_allow_html=True,
         )
 
+        # Phase 24.22 — surface the underlying circuit-history evidence so
+        # the user can sanity-check the badge. Without this, a chronic-LC
+        # name silently overridden up to "high" looks identical to a model
+        # genuinely-confident "high" — and conversely a clean name dampened
+        # back to "low" needs to show why.
+        chist = card_dict.get("circuit_history") or {}
+        if chist:
+            hits_5 = int(chist.get("hits_5d", 0) or 0)
+            hits_20 = int(chist.get("hits_20d", 0) or 0)
+            hits_60 = int(chist.get("hits_60d", 0) or 0)
+            locked_now = bool(chist.get("currently_locked", False))
+            last_dir = chist.get("last_lock_direction")
+            streak = int(chist.get("consecutive_lock_days", 0) or 0)
+            days_since = int(chist.get("days_since_last_lock", 10**6) or 0)
+            parts = []
+            if locked_now:
+                parts.append(
+                    f"<b>currently locked at {last_dir or 'unknown'} circuit</b>"
+                )
+            if streak > 1:
+                parts.append(f"streak: {streak} consecutive locked sessions")
+            if hits_5:
+                parts.append(f"{hits_5}× in last 5d")
+            if hits_20:
+                parts.append(f"{hits_20}× in last 20d")
+            if hits_60 == 0 and chist.get("n_bars", 0) >= 60:
+                parts.append("0 circuits in last 60d")
+            if not locked_now and hits_60 and days_since < 10**5:
+                parts.append(f"last lock: {days_since}d ago ({last_dir})")
+            if parts:
+                st.markdown(
+                    "<div style='font-size:var(--text-xs);"
+                    "color:var(--text-muted);margin-top:4px;"
+                    "font-family:JetBrains Mono,monospace;'>"
+                    "circuit history: "
+                    + " · ".join(parts)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
     # ---- section 6: pillars ----
     pillars = card_dict.get("pillars", {}) or {}
     if pillars:

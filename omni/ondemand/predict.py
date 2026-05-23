@@ -62,6 +62,10 @@ class PredictionCard:
     # `circuit_risk_band` "low" / "elevated" / "high" or None when n/a.
     circuit_risk_pct: float | None = None
     circuit_risk_band: str | None = None
+    # Phase 24.22 — recent locked-bar history surfaced for the UI so users
+    # can see WHY a name was flagged (e.g. "hit lower circuit 3 times in
+    # the last 5 sessions"). Empty dict when not computed / not India.
+    circuit_history: dict | None = None
     # ---- new in UI v2 ----
     expected_move_pct: float = 0.0       # signed point estimate over 5 trading days
     expected_low_pct: float = 0.0        # ~ -1 sigma envelope
@@ -942,6 +946,7 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
     # the main proba so a circuit-model failure can never break the card.
     circuit_pct: float | None = None
     circuit_band_str: str | None = None
+    circuit_hist: dict | None = None
     if asset_class == "india" and circuit_model is not None:
         try:
             from omni.models import circuit_risk as _crisk
@@ -954,11 +959,76 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
         except Exception as exc:  # noqa: BLE001
             log.warning(f"circuit_risk score failed [{ticker}]: {exc}")
 
+    # Phase 24.22 — circuit-history override.
+    # The trained model uses ATR/vol features that COLLAPSE on locked bars
+    # (range == 0, return clipped at -10%), so a stock that has been hitting
+    # lower circuits looks artificially LESS risky to the model. Conversely,
+    # liquid names with a recent volatile sell-off trip the model's "high
+    # vol + drop" pattern even when they have zero historical circuits.
+    #
+    # We compute the circuit-history directly from OHLC and apply a
+    # deterministic two-sided correction:
+    #   1. UPLIFT when there's recent lower-circuit evidence the model
+    #      cannot see (chronic-LC names like CIANAGRO).
+    #   2. DAMPEN when the model fires high but the name has NOT hit a
+    #      circuit in the lookback window (e.g. FORCE MOTORS false positive).
+    if asset_class == "india":
+        try:
+            from omni.features.circuit import recent_circuit_history
+            hist = recent_circuit_history(bundle.prices, asset_class="india")
+            circuit_hist = hist
+            base_p = float(circuit_pct) if circuit_pct is not None else 0.0
+            adj_p = base_p
+            reason = None
+
+            # ---- (1) UPLIFT: chronic / active lower-circuit pattern ----
+            if (hist.get("currently_locked")
+                    and hist.get("last_lock_direction") == "lower"):
+                # Currently locked at lower circuit RIGHT NOW.
+                adj_p = max(adj_p, 0.55)
+                reason = "currently locked at lower circuit"
+            elif (hist.get("hits_5d", 0) >= 2
+                    and hist.get("last_lock_direction") == "lower"):
+                # 2+ lower-circuit days in the last week.
+                adj_p = max(adj_p, 0.35)
+                reason = f"{hist['hits_5d']} lower-circuit days in last 5"
+            elif (hist.get("hits_20d", 0) >= 3
+                    and hist.get("last_lock_direction") == "lower"
+                    and hist.get("days_since_last_lock", 10**6) < 5):
+                # Pattern of recurring lower circuits in the last month.
+                adj_p = max(adj_p, 0.22)
+                reason = f"{hist['hits_20d']} lower-circuits in last 20d"
+
+            # ---- (2) DAMPEN: model fired high on a name with no recent
+            # circuit history at all. This is exactly the FORCE MOTORS
+            # false-positive pattern — the model latches onto recent
+            # vol/drawdown features but the name has zero historical
+            # locked bars, so the prior should pull it back hard.
+            if (reason is None
+                    and base_p >= 0.20
+                    and hist.get("hits_60d", 0) == 0
+                    and hist.get("n_bars", 0) >= 60):
+                adj_p = max(0.05, base_p * 0.50)
+                reason = "no circuit hits in last 60d (model false-positive guard)"
+
+            if abs(adj_p - base_p) > 1e-9:
+                from omni.models import circuit_risk as _crisk
+                circuit_pct = adj_p
+                circuit_band_str = _crisk.band(adj_p)
+                log.info(
+                    f"circuit_risk[{ticker}] OVERRIDE: model_p={base_p:.3f} "
+                    f"-> adj_p={adj_p:.3f} band={circuit_band_str} "
+                    f"({reason})"
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"circuit history override skipped [{ticker}]: {exc}")
+
     card = _build_card(bundle, feats, proba, model_kind=kind,
                         per_horizon_proba=per_horizon)
     if card is not None:
         card.circuit_risk_pct = circuit_pct
         card.circuit_risk_band = circuit_band_str
+        card.circuit_history = circuit_hist or {}
 
         # Phase 24.22 — circuit-risk conviction shrinker. If the system is
         # signalling LONG but the dedicated circuit-risk model says there's
