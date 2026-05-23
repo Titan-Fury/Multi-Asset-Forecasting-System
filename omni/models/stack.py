@@ -363,6 +363,12 @@ def fit_stack(
         meta_oof_auc = 0.0
 
     # Re-fit each base on FULL data for inference
+    # Phase 24.23 — define X_filled (impute with global medians, then 0 for
+    # any column that was all-NaN). Previously this variable was referenced
+    # below without being assigned, causing the final base-fit step to raise
+    # NameError and silently leave base_models empty (regime stacks shipped
+    # with no base learners, which broke inference).
+    X_filled = X.fillna(medians).fillna(0.0)
     base_models: dict[str, Any] = {}
     for name, mk in base_specs.items():
         try:
