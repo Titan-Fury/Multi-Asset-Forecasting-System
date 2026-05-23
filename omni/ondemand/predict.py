@@ -634,6 +634,32 @@ def _build_card(
         expected_low_pct = float(expected_move_pct - sigma_5d_pct)
         expected_high_pct = float(expected_move_pct + sigma_5d_pct)
 
+    # ---- Conformal-direction override (Phase 24.23) -----------------------
+    # When a calibrated 80%-coverage interval is available, derive direction
+    # explicitly from the interval rather than from the proba threshold:
+    #   entire interval positive (low > 0)   -> LONG
+    #   entire interval negative (high < 0)  -> SHORT
+    #   interval straddles zero              -> FLAT
+    # This replaces the heuristic "FLAT zone" around proba=0.5 with a
+    # mathematically grounded uncertainty test. When the model is genuinely
+    # uncertain the interval is wide and naturally straddles zero, producing
+    # FLAT without any hardcoded conviction floor.
+    _conformal_dir_override: int | None = None
+    if _conformal_used:
+        if expected_low_pct > 0:
+            _conformal_dir_override = 1
+        elif expected_high_pct < 0:
+            _conformal_dir_override = -1
+        else:
+            _conformal_dir_override = 0
+        _row_dir = int(row.get("direction", 0))
+        if _conformal_dir_override != _row_dir:
+            log.info(
+                f"conformal-direction[{bundle.ticker}]: "
+                f"interval=[{expected_low_pct:+.2f}%, {expected_high_pct:+.2f}%] "
+                f"-> dir {_row_dir} -> {_conformal_dir_override}"
+            )
+
     # Per-horizon expected moves. Drift scales LINEARLY with time (h/5),
     # vol scales as SQRT(h/5). The model is calibrated on 5d direction;
     # 1d and 1m are first-order extrapolations from the same edge UNLESS a
@@ -724,7 +750,9 @@ def _build_card(
         asset_class=bundle.asset_class,
         display_name=bundle.display_name,
         asof=asof_ts,
-        direction=int(row.get("direction", 0)),
+        direction=int(_conformal_dir_override
+                      if _conformal_dir_override is not None
+                      else row.get("direction", 0)),
         conviction=float(row.get("conviction", 0.0)),
         blended_p=float(row.get("blended_p", 0.0)),
         proba_up=float(proba_up),
