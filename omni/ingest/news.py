@@ -152,9 +152,17 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
     # already swallows transient errors and returns an empty frame.
     if cfg.get("news", {}).get("gdelt", {}).get("enabled", True):
         try:
+            import time as _time
             from omni.ingest.sources import gdelt as _gdelt
+            # Phase 24.20 — throttle GDelt to avoid 429 storms. The DOC API
+            # rate-limits unauthenticated callers aggressively; ~5s between
+            # requests keeps us comfortably under the threshold.
+            _gdelt_first = True
             for t in tickers_list:
                 try:
+                    if not _gdelt_first:
+                        _time.sleep(5.0)
+                    _gdelt_first = False
                     df = _gdelt.news(t, lookback_days=max(lookback_days, 2))
                     if df is None or df.empty:
                         continue
@@ -170,6 +178,44 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
                     log.debug(f"gdelt {t}: {exc}")
         except ImportError:
             log.debug("gdelt source not importable; skipping")
+
+    # Phase 24.22 — Apify Twitter / X scraper. Off by default. Gated on
+    # both the YAML toggle AND the APIFY_TOKEN env var so a partial
+    # install (config edited but token missing) never crashes the run.
+    twcfg = cfg.get("social", {}).get("twitter", {}) or {}
+    if twcfg.get("enabled"):
+        try:
+            from omni.ingest.sources import apify_twitter as _twitter
+            if not _twitter._have_token():
+                log.debug("twitter enabled in YAML but APIFY_TOKEN unset; skipping")
+            else:
+                df_tw = _twitter.fetch_for_tickers(
+                    tickers_list,
+                    max_items_per_ticker=int(twcfg.get("tweets_per_ticker", 30)),
+                    lookback_hours=int(twcfg.get("lookback_hours", 24)),
+                    batch_size=int(twcfg.get("batch_size", 8)),
+                    actor_id=str(twcfg.get("actor_id", _twitter.DEFAULT_ACTOR_ID)),
+                    lang=twcfg.get("lang", "en") or None,
+                    cashtags=bool(twcfg.get("cashtags", True)),
+                    hashtags=bool(twcfg.get("hashtags", True)),
+                    sleep_between=float(twcfg.get("sleep_between", 1.0)),
+                )
+                if df_tw is not None and not df_tw.empty:
+                    df_tw = _normalize(df_tw.drop(columns=["sent_score"], errors="ignore"))
+                    if not df_tw.empty:
+                        for t, sub in df_tw.groupby("ticker_hint"):
+                            if not t or sub.empty:
+                                continue
+                            tiers.save_raw(sub, source="news_twitter",
+                                           asset_class="all",
+                                           ticker=str(t),
+                                           dedup_cols=["url"])
+                        combined_parts.append(df_tw)
+                        total += len(df_tw)
+                        log.info(f"apify_twitter: {len(df_tw)} tweets across "
+                                 f"{df_tw['ticker_hint'].nunique()} tickers")
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"apify_twitter ingest failed: {exc}")
 
     # Phase 24.18 — also persist the combined frame to the lake so the
     # training-set builder can read historical news via

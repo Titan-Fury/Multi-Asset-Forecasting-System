@@ -61,7 +61,20 @@ social:
       - CryptoCurrency
       - Forex
   twitter:
-    enabled: false   # enable in v2
+    # Phase 24.22 — Apify-backed Twitter / X scraping. Off by default.
+    # Flip `enabled: true` AND set APIFY_TOKEN in .env to activate.
+    # Cost: at apidojo/tweet-scraper pricing, 100 tickers x 30 tweets/day
+    # is roughly USD 22-36 / month. Tighten `tweets_per_ticker` to lower
+    # spend; set `lookback_hours: 6` for intraday-only sweeps.
+    enabled: false
+    actor_id: apidojo/tweet-scraper
+    tweets_per_ticker: 30
+    lookback_hours: 24
+    batch_size: 8           # tickers per actor run (amortises warm-up cost)
+    lang: en                # set to null for multilingual (more results, more noise)
+    cashtags: true          # search $TICKER
+    hashtags: true          # search #TICKER
+    sleep_between: 1.0      # seconds between actor batches
 
 storage:
   hot_root: C:\Omni_Stocks\data

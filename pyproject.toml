@@ -43,6 +43,10 @@ dependencies = [
     "praw>=7.7",
     "requests>=2.32",
     "httpx>=0.27",
+    # Optional: Apify Twitter / X scraping. Only imported when
+    # social.twitter.enabled=true in config/sources.yaml AND
+    # APIFY_TOKEN is set in the environment.
+    "apify-client>=1.7",
 
     # Dashboard
     "streamlit>=1.36",
