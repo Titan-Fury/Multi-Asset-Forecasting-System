@@ -17,6 +17,7 @@ price row gets the most recent fundamentals available AS OF that date.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
@@ -108,7 +109,7 @@ def fetch_quarterly_fundamentals(asset_class: str, ticker: str) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(["asof_date", "metric"]).reset_index(drop=True)
 
 
-def quarterly_path(ticker: str) -> "Path":  # type: ignore[name-defined]
+def quarterly_path(ticker: str) -> Path:
     return lake_paths.lake_root() / "fundamentals" / "quarterly" / f"{ticker.upper()}.parquet"
 
 

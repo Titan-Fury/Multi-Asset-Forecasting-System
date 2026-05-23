@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Iterable
 from xml.etree import ElementTree as _ET
 
 import pandas as pd

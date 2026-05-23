@@ -29,25 +29,23 @@ import re
 import numpy as np
 import pandas as pd
 
-from omni.utils.logger import log
-
 # Curated keyword set for earnings-related news items. Matched
 # case-insensitively as substrings of headline + body.
 _EARN_PATTERNS = (
     r"\bearnings?\b",
     r"\beps\b",
-    r"\bquarter\w*\s*(result|earnings)",
-    r"\bq[1-4]\s*(fy)?",
+    r"\bquarter\w*\s*(?:result|earnings)",
+    r"\bq[1-4]\s*(?:fy)?",
     r"\bguidance\b",
-    r"\bmiss(es|ed)?\s+(estimate|expectation|consensus)",
-    r"\bbeat(s|en)?\s+(estimate|expectation|consensus)",
-    r"\brevenue\s+(growth|decline|jump|fall)",
-    r"\bprofit\s+(growth|decline|jump|fall)",
+    r"\bmiss(?:es|ed)?\s+(?:estimate|expectation|consensus)",
+    r"\bbeat(?:s|en)?\s+(?:estimate|expectation|consensus)",
+    r"\brevenue\s+(?:growth|decline|jump|fall)",
+    r"\bprofit\s+(?:growth|decline|jump|fall)",
     r"\boutlook\b",
     r"\bforward\s+guidance",
     r"\bconference\s+call\b",
     r"\bearnings\s+call\b",
-    r"\b(profit|loss)\s+widened",
+    r"\b(?:profit|loss)\s+widened",
 )
 _EARN_RE = re.compile("|".join(_EARN_PATTERNS), re.IGNORECASE)
 

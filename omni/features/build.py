@@ -24,7 +24,7 @@ Anti-leakage rules enforced here:
 """
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path  # noqa: F401  re-exported / used by importing modules
 
 import pandas as pd
 
