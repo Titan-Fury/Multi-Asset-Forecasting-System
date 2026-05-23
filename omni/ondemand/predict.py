@@ -1152,6 +1152,36 @@ def deep_analysis(ticker: str, asset_class: str,
             # so a regression in the metric pipeline isn't silent.
             log.debug("deep_analysis: skip fold AUC: %s", exc)
 
+    # ---- Fold-quality filter (Phase 24.23) --------------------------------
+    # Folds with AUC < 0.45 are worse than a coin flip — that's not noise,
+    # it's evidence the model has learned an inverted relationship for that
+    # period (regime mismatch or label-leakage in reverse). Shrink the deep
+    # prediction toward the universal prior in proportion to the fraction of
+    # bad folds. If ALL folds are bad, fall back entirely to universal.
+    GOOD_AUC_THR = 0.45
+    if fold_aucs:
+        n_total = len(fold_aucs)
+        n_good = sum(1 for a in fold_aucs if a >= GOOD_AUC_THR)
+        fold_quality = n_good / n_total if n_total > 0 else 0.0
+        if fold_quality < 1.0 and proba_universal is not None:
+            old_proba = proba
+            # Multiplicative shrinkage: bad folds reduce trust in the deep
+            # signal, pulling further toward the universal prior.
+            effective_w = shrink_w * fold_quality
+            proba = effective_w * proba_deep + (1.0 - effective_w) * proba_universal
+            log.info(
+                f"deep_analysis fold-quality: aucs={[round(a,3) for a in fold_aucs]} "
+                f"good={n_good}/{n_total} q={fold_quality:.2f} "
+                f"shrink={shrink_w:.2f}->{effective_w:.2f} "
+                f"proba {old_proba:.3f}->{proba:.3f}"
+            )
+        elif fold_quality < 1.0:
+            log.info(
+                f"deep_analysis fold-quality: aucs={[round(a,3) for a in fold_aucs]} "
+                f"good={n_good}/{n_total} q={fold_quality:.2f} "
+                f"(universal unavailable, no shrink applied)"
+            )
+
     card = _build_card(bundle, full, proba,
                        model_kind="walk_forward_per_ticker", fold_aucs=fold_aucs)
     card.deep_analysis_available = False
