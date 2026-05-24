@@ -196,7 +196,6 @@ def _theme_override(choice: str) -> None:
     if choice not in THEMES or not THEMES[choice]:
         return  # Auto / unknown — let base CSS rule
 
-    css_vars = "; ".join(f"{k}: {v}" for k, v in THEMES[choice].items())
     # Inject with !important so the user choice beats the @property defaults.
     extras = ""
     if choice == "Cyberpunk":
@@ -326,8 +325,6 @@ def _render_history_pills(entries: list[dict], *, prefix: str,
         return
     arrow_map = {1: "▲", -1: "▼", 0: "●"}
     cols = st.columns(min(len(entries), 4))
-    exch_map = {"india": "NSE", "us": "US", "crypto": "CRYPTO",
-                 "fx": "FX", "etf": "ETF", "index": "IDX"}
     for i, e in enumerate(entries):
         with cols[i % len(cols)]:
             tk = e.get("ticker", "?")
@@ -348,7 +345,6 @@ def _render_history_pills(entries: list[dict], *, prefix: str,
                                 + (f"regime: {e.get('last_regime')}\n"
                                     if e.get("last_regime") else "")
                             )):
-                exch = exch_map.get(ac, "?")
                 st.session_state["predict_ticker_select"] = (
                     f"{tk:<16}  —  {e.get('display_name', tk)}"
                 )
@@ -1779,7 +1775,7 @@ def _render_predict_tab() -> None:
                 n = _sh.clear_all()
                 st.toast(f"Cleared {n} entries from history.", icon="🗑️")
                 st.rerun()
-            cc2.caption(f"Stored at `data/watchlist/search_history.json`")
+            cc2.caption("Stored at `data/watchlist/search_history.json`")
 
     # Initial suggestion list (popular names) — refreshed once query typed
     initial = _suggest_options("")
@@ -1868,7 +1864,6 @@ def _render_predict_tab() -> None:
     st.divider()
 
     # Action dispatch — deep takes priority if both clicked
-    card = None
     # Force-refresh: drop every cache entry referencing this ticker so the
     # next predict_ticker call rebuilds prices, news, fundamentals and the
     # prediction card from live APIs. The 30-min default TTL still applies
@@ -2298,11 +2293,11 @@ def main() -> None:
                               f"text-transform:uppercase;margin-left:6px;'>"
                               f"{age_days}d old</span>")
             else:
-                stale_chip = (f"<span style='color:#4ade80;font-weight:700;"
-                              f"background:rgba(74,222,128,0.12);padding:2px 8px;"
-                              f"border-radius:6px;font-size:10px;letter-spacing:0.05em;"
-                              f"text-transform:uppercase;margin-left:6px;'>"
-                              f"fresh</span>")
+                stale_chip = ("<span style='color:#4ade80;font-weight:700;"
+                              "background:rgba(74,222,128,0.12);padding:2px 8px;"
+                              "border-radius:6px;font-size:10px;letter-spacing:0.05em;"
+                              "text-transform:uppercase;margin-left:6px;'>"
+                              "fresh</span>")
             date_str = last_run.date().isoformat()
         else:
             stale_chip = ""

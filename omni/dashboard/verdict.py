@@ -163,8 +163,8 @@ def _summary_phrase(headline: str, tone: str, *,
     if direction == -1:
         return (f"SHORT signal{rg_clause}. Model probability {p:.2f} (down), "
                  f"conviction {c:.0f}/100. Use the expected-move band for stop / target.")
-    return (f"Direction flat despite passing the gate - unusual; check the "
-             f"reasons string.")
+    return ("Direction flat despite passing the gate - unusual; check the "
+              "reasons string.")
 
 
 def verdict(card_dict: dict) -> Verdict:

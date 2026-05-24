@@ -558,7 +558,6 @@ def prediction_card(card_dict: dict) -> None:
     # ---- pull fields with safe defaults ----
     direction = int(card_dict.get("direction", 0))
     label = _DIR_LABEL[direction]
-    kind = _DIR_KIND[direction]
     arrow = _direction_arrow(direction)
     conviction = float(card_dict.get("conviction", 0) or 0)
     blended = float(card_dict.get("blended_p", 0) or 0)
@@ -661,7 +660,7 @@ def prediction_card(card_dict: dict) -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
-    except Exception as _exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         # Never let the verdict banner break the card render
         pass
 
@@ -907,8 +906,8 @@ def prediction_card(card_dict: dict) -> None:
         avg = sum(fold_aucs) / len(fold_aucs)
         st.markdown(
             "<div style='font-size:var(--text-xs);color:var(--text-muted);"
-            f"margin-top:var(--space-3);font-family:JetBrains Mono,monospace'>"
-            f"deep-analysis fold AUCs: "
+            "margin-top:var(--space-3);font-family:JetBrains Mono,monospace'>"
+            "deep-analysis fold AUCs: "
             + " · ".join(f"{a:.3f}" for a in fold_aucs)
             + f"  (mean {avg:.3f})</div>",
             unsafe_allow_html=True,
