@@ -12,8 +12,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import requests
-
 from omni.llm.backends.base import Backend, BackendError, LLMResult, http_session
 from omni.utils.env import get_env
 
