@@ -281,7 +281,7 @@ def fit_stack(
         fold_med = fold_med.fillna(medians).fillna(0.0)
         Xtr = X.iloc[tr].fillna(fold_med).fillna(0.0).to_numpy(dtype=float)
         Xva = X.iloc[va].fillna(fold_med).fillna(0.0).to_numpy(dtype=float)
-        ytr = y[tr]; yva = y[va]
+        ytr = y[tr]
         for name, mk in base_specs.items():
             try:
                 m = mk()

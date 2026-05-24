@@ -32,7 +32,6 @@ def series(series_id: str, *, lookback_years: int = 10) -> pd.DataFrame:
     # the whole day; now we retry with exponential backoff so a single 500
     # blip doesn't leave us with empty CPI/VIX/UST features.
     last_text = ""
-    last_status = 0
     for attempt in range(3):
         try:
             r = requests.get(
@@ -49,7 +48,6 @@ def series(series_id: str, *, lookback_years: int = 10) -> pd.DataFrame:
                     log.warning(f"fred {series_id}: malformed JSON response")
                     return pd.DataFrame(columns=["date", "series_id", "value"])
                 break
-            last_status = r.status_code
             last_text = r.text[:200]
             if r.status_code in (500, 502, 503, 504) and attempt < 2:
                 # backoff 2s, 4s

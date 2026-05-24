@@ -68,7 +68,6 @@ def _accruals_pct_assets(df: pd.DataFrame) -> pd.Series:
     `return_on_assets` are present, approximate as ROA - margin*ATO.
     Returns NaN-Series of df length when all inputs missing.
     """
-    n = len(df)
     out = pd.Series(np.nan, index=df.index, dtype=float)
 
     ni = _safe_num(df.get("net_income"))
@@ -107,7 +106,6 @@ def _piotroski_f_score(df: pd.DataFrame) -> pd.Series:
 
     Returns 0-9; NaN when too many inputs are missing.
     """
-    n = len(df)
     score = pd.Series(0.0, index=df.index, dtype=float)
     used = pd.Series(0, index=df.index, dtype=int)
 
