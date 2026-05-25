@@ -16,6 +16,62 @@ from omni.features import targets as _tgt
 from omni.features import technical as _tech
 
 
+# ----------------------------------------------------------------------
+# Phase 28 — recent-pool slice for live cross-sectional ranking.
+# Reads the most-recent ~14 trading days from training_set.parquet for
+# the given asset_class so the inference path can compute REAL ranks
+# instead of the legacy 0.5 placeholder. Cached 5 minutes to amortise
+# the parquet read across rapid-fire prediction calls.
+# ----------------------------------------------------------------------
+def _load_recent_pool_slice(asset_class: str, *,
+                              lookback_days: int = 14) -> "pd.DataFrame | None":
+    """Return the latest `lookback_days` rows from the lake for cross-
+    sectional rank parity. None when the lake is unavailable."""
+    try:
+        from omni.ondemand.cache import cached, TTL  # local import: tolerate
+        # absent diskcache backend (e.g. fresh checkout).
+    except Exception:  # noqa: BLE001
+        cached, TTL = None, None
+
+    def _read(asset_class: str) -> "pd.DataFrame | None":
+        try:
+            from pathlib import Path
+            p = Path("data") / "lake" / "training" / "training_set.parquet"
+            if not p.exists():
+                return None
+            # PyArrow filters keep the read O(asset_class slice) instead
+            # of O(full panel).
+            try:
+                df = pd.read_parquet(
+                    p, filters=[("asset_class", "==", asset_class)],
+                    columns=None,  # need every rank-input col + date
+                )
+            except Exception:
+                # Fallback: read full and filter in-memory.
+                df = pd.read_parquet(p)
+                if "asset_class" in df.columns:
+                    df = df[df["asset_class"] == asset_class]
+            if df is None or df.empty or "date" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            cutoff = df["date"].max() - pd.Timedelta(days=lookback_days)
+            return df[df["date"] >= cutoff].reset_index(drop=True)
+        except Exception:  # noqa: BLE001
+            return None
+
+    if cached is None or TTL is None:
+        return _read(asset_class)
+
+    @cached(ttl=300, key="features_inline_pool_slice:{asset_class}")
+    def _read_cached(asset_class: str):
+        return _read(asset_class)
+
+    try:
+        return _read_cached(asset_class)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def build_features_inline(
     asset_class: str,
     ticker: str,
@@ -119,27 +175,64 @@ def build_features_inline(
     except Exception as exc:  # noqa: BLE001
         from omni.utils.logger import log
         log.warning(f"sentiment_z failed: {exc}")
-    # Audit-doc B2 fix: do NOT compute cross-sectional ranks on a single ticker
-    # in the live path — every percentile collapses to 0.5 and the model sees
-    # constant features that disagree with training (which ranks across pooled
-    # universe). Instead emit zero-filled placeholder columns so the schema
-    # matches but feature distribution is harmless.
+    # Phase 28 — cross-sectional rank parity.
+    # PRIOR BUG: this block emitted 0.5 placeholders for every `*_pct` column
+    # because a single live row trivially has rank 0.5 within its own
+    # group. The training pipeline computes ranks across the pooled panel
+    # (build_training_set.py), so the model ALSO trained on real ranks —
+    # at inference the 0.5 constant stripped all signal from features the
+    # model relied on (`ret_20d_pct`, `panic_keyword_ratio_pct`, etc.).
+    # FIX: read the most-recent slice of training_set.parquet for the same
+    # asset_class, append the live row, run the rank transform, copy the
+    # resulting `*_pct` columns back. If the slice is unavailable (cold
+    # start / no lake), fall back to the old 0.5 placeholder.
     try:
         from omni.features.cross_sectional import add_cross_sectional_ranks
-        # Probe the column set this transform produces by running on a
-        # cheap two-row dummy frame, then zero-fill those columns on `out`.
         if "asset_class" not in out.columns:
             out["asset_class"] = asset_class
         probe_cols = list(out.columns)
+        sample = out.head(2).copy()
         try:
-            sample = out.head(2).copy()
             transformed = add_cross_sectional_ranks(sample)
             new_cols = [c for c in transformed.columns if c not in probe_cols]
         except Exception:
             new_cols = []
-        for c in new_cols:
-            if c not in out.columns:
-                out[c] = 0.5  # neutral percentile
+
+        # Try the live-rank path first.
+        ranked_ok = False
+        try:
+            slice_df = _load_recent_pool_slice(asset_class)
+            if slice_df is not None and not slice_df.empty:
+                live_row = out.tail(1).copy()
+                # Align the live row's date to the slice's max date so the
+                # group-by-(date, asset_class) puts it in the SAME bucket as
+                # the persisted population. This is what makes the rank
+                # meaningful — comparing today's CIANAGRO against today's
+                # other India equities, not against itself.
+                latest_date = slice_df["date"].max()
+                live_row = live_row.copy()
+                live_row["date"] = latest_date
+                live_row["asset_class"] = asset_class
+                # Ensure column overlap; the rank transform only operates on
+                # known input cols (_RANK_COLS in cross_sectional.py).
+                pooled = pd.concat([slice_df, live_row], ignore_index=True, sort=False)
+                pooled_ranked = add_cross_sectional_ranks(pooled)
+                live_ranked = pooled_ranked.iloc[[-1]]
+                for c in new_cols:
+                    if c in live_ranked.columns:
+                        out[c] = float(live_ranked[c].iloc[0]) if pd.notna(
+                            live_ranked[c].iloc[0]) else 0.5
+                ranked_ok = True
+        except Exception as exc:  # noqa: BLE001
+            from omni.utils.logger import log
+            log.debug(f"live cross-sectional rank failed, falling back: {exc}")
+
+        if not ranked_ok:
+            # Cold-start fallback: 0.5 placeholder (identical to legacy
+            # behaviour so we never regress relative to before this fix).
+            for c in new_cols:
+                if c not in out.columns:
+                    out[c] = 0.5
     except Exception as exc:  # noqa: BLE001
         from omni.utils.logger import log
         log.warning(f"cross-sectional rank placeholder failed: {exc}")
