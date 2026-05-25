@@ -232,18 +232,21 @@ tasks:
     cache_ttl_days: 30
 
   daily_market_synthesis:
-    # Nemotron-3-Super promoted to primary (free, MoE 120B/12B-active, 262K ctx,
-    # no per-day 50-req cap that bites MiniMax). Groq Llama-3.3-70B is a
-    # very fast secondary; MiniMax kept further down because it intermittently
-    # 429s upstream.
-    primary: [openrouter_nemotron_chat]
-    fallback: [groq_llama70b, openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, gemini_flash, openrouter_gpt_oss_120b, cortex_claude, cortex_llama405, openrouter_llama70b]
+    # Phase 28.1 — moved Groq + Gemini ahead of OpenRouter `:free` chain to
+    # avoid OpenRouter's 50-req/day account-level cap. Nemotron-3-Super
+    # remains primary for the OpenRouter slot but only fires when Groq +
+    # Gemini both blow their RPM. MiniMax demoted further down because of
+    # chronic upstream 429s.
+    primary: [groq_llama70b]
+    fallback: [gemini_flash, openrouter_nemotron_chat, openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_gpt_oss_120b, openrouter_minimax_free, cortex_claude, cortex_llama405, openrouter_llama70b]
     cache_ttl_days: 1
     cost_class: paid
 
   signal_explanation:
-    primary: [openrouter_nemotron_chat]
-    fallback: [openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, groq_llama70b, openrouter_nemotron_omni_reason, gemini_flash, openrouter_gpt_oss_120b, ollama_qwen, openrouter_gemma, openrouter_nemotron_nano, cortex_claude]
+    # Phase 28.1 — see signal_explanation_rag note. Same reasoning: Groq /
+    # Gemini have far higher free-tier quotas than OpenRouter's 50/day cap.
+    primary: [groq_llama70b]
+    fallback: [gemini_flash, openrouter_nemotron_chat, openrouter_deepseek_v4_flash, openrouter_qwen3_next_80b, openrouter_nemotron_omni_reason, openrouter_gpt_oss_120b, openrouter_minimax_free, openrouter_gemma, openrouter_nemotron_nano, ollama_qwen, cortex_claude]
     cache_ttl_days: 1
 
   # Phase 24.15 — RAG-grounded signal explanation. Same backend chain but
@@ -256,12 +259,17 @@ tasks:
   #   rag.retrieval.top_k           number of chunks fed to the LLM
   #   rag.validators.grounding_min  sentence-cosine threshold for is_safe
   signal_explanation_rag:
-    # User preference (Phase 24.18): Nemotron PRIMARY (best free reasoner for
-    # finance), MiniMax M2.5 demoted to fallback because it is constantly
-    # rate-limited upstream (429s). Qwen3-Next-80B and DeepSeek-V4-Flash are
-    # added as additional strong free reasoners ahead of MiniMax.
-    primary: [openrouter_nemotron_chat]
-    fallback: [openrouter_qwen3_next_80b, openrouter_deepseek_v4_flash, openrouter_minimax_free, groq_llama70b, openrouter_nemotron_omni_reason, gemini_flash, openrouter_gpt_oss_120b, openrouter_llama70b, ollama_qwen, cortex_claude]
+    # Phase 28.1 — chain reordered. OpenRouter `:free` tier is capped at 50
+    # requests per day per ACCOUNT across ALL `:free` models combined; once
+    # that quota is burnt every `:free` model returns "Rate limit exceeded:
+    # free-models-per-day" 429s for the rest of the day. Groq has ~14,400
+    # reqs/day and Gemini ~1,500/day on free tier — vastly more headroom.
+    # MiniMax-M2.5 and Qwen3-Next get upstream-429'd even when account quota
+    # is fine (their providers gate aggressively independent of OpenRouter),
+    # so they're demoted near the end. Local Ollama and Snowflake Cortex
+    # are kept as final fallbacks for when every cloud free tier is dry.
+    primary: [groq_llama70b]
+    fallback: [gemini_flash, openrouter_nemotron_chat, openrouter_deepseek_v4_flash, openrouter_qwen3_next_80b, openrouter_nemotron_omni_reason, openrouter_gpt_oss_120b, openrouter_minimax_free, openrouter_llama70b, ollama_qwen, cortex_claude]
     cache_ttl_days: 1
     cost_class: free
     rag:
