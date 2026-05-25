@@ -556,7 +556,10 @@ def prediction_card(card_dict: dict) -> None:
         7. Side-by-side details (Data collected · News)
     """
     # ---- pull fields with safe defaults ----
-    direction = int(card_dict.get("direction", 0))
+    # `int(None)` raises TypeError; `... or 0` coerces a None coming from a
+    # card with `direction` explicitly set to None (FastAPI client path) to a
+    # safe 0 (FLAT) for the LABEL/arrow lookups below.
+    direction = int(card_dict.get("direction", 0) or 0)
     label = _DIR_LABEL[direction]
     arrow = _direction_arrow(direction)
     conviction = float(card_dict.get("conviction", 0) or 0)
