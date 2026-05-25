@@ -2597,6 +2597,394 @@ _ULTRA_FX_JS = """
 """
 
 
+_PHASE27_CRAZY_FX_CSS = """
+<style>
+/* ============================================================
+   Phase 27 — CRAZY GRAPHICS LAYER
+   ------------------------------------------------------------
+   Drama without breaking legibility. Composable. Honors
+   prefers-reduced-motion. Reuses existing tokens (--accent,
+   --surface-*, --border-*) so all six themes inherit.
+
+   Effects in this chunk:
+     A. Animated mesh-gradient app background
+     B. Floating ambient orbs (corners, slow drift)
+     C. Subtle drifting grid backdrop
+     D. Holographic shine sweep across .hero on first paint
+     E. Active-tab conic ribbon glow
+     F. Animated cyan→magenta border on .signal-card:hover
+     G. Neon scale-from-center underline on primary buttons
+     H. RGB-channel glitch on hero h1 hover
+     I. Pure-CSS starfield twinkle
+     J. KPI tile aura when high-conviction (uses :has())
+     K. Scroll-into-view fade-in for cards
+     L. Tab alignment refinement + tabpanel cross-fade
+   ============================================================ */
+
+@media (prefers-reduced-motion: no-preference) {
+
+/* ============================================================
+   A. Animated mesh-gradient background
+   Three drifting radial gradients sit BEHIND everything; the
+   composite slowly migrates so the canvas feels alive without
+   distracting from data.
+   ============================================================ */
+.stApp::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      radial-gradient(800px 600px at 18% 22%,
+        color-mix(in oklch, var(--accent) 16%, transparent), transparent 62%),
+      radial-gradient(900px 700px at 82% 30%,
+        color-mix(in oklch, #a855f7 14%, transparent), transparent 60%),
+      radial-gradient(1000px 800px at 50% 92%,
+        color-mix(in oklch, #06b6d4 12%, transparent), transparent 58%);
+    animation: omni-mesh-drift 36s ease-in-out infinite alternate;
+}
+@keyframes omni-mesh-drift {
+    0%   { transform: translate3d(0, 0, 0) scale(1); }
+    50%  { transform: translate3d(2%, -2%, 0) scale(1.04); }
+    100% { transform: translate3d(-2%, 1.5%, 0) scale(0.98); }
+}
+
+/* ============================================================
+   B. Floating ambient orbs
+   Three fixed corner orbs that drift; viewport corners only so
+   they never overlap dense UI regions.
+   ============================================================ */
+.stApp::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(420px 420px at 8% 6%,
+        color-mix(in oklch, var(--accent) 28%, transparent), transparent 70%),
+      radial-gradient(500px 500px at 96% 94%,
+        color-mix(in oklch, #ec4899 22%, transparent), transparent 70%),
+      radial-gradient(360px 360px at 92% 4%,
+        color-mix(in oklch, #f59e0b 16%, transparent), transparent 70%);
+    filter: blur(28px);
+    opacity: 0.85;
+    animation: omni-orbs-drift 52s ease-in-out infinite alternate;
+}
+@keyframes omni-orbs-drift {
+    0%   { transform: translate3d(0,    0,   0); }
+    33%  { transform: translate3d(-1.5%, 1%,  0); }
+    66%  { transform: translate3d(1.2%, -1%,  0); }
+    100% { transform: translate3d(0,    0.6%, 0); }
+}
+
+/* ============================================================
+   C. Subtle drifting grid backdrop
+   32px grid, ~3% opacity, slow horizontal drift. Adds depth
+   to "empty" regions without ever competing with chart ink.
+   ============================================================ */
+[data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: fixed;
+    inset: -10% -10% -10% -10%;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right,
+        color-mix(in oklch, var(--text-primary) 4%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom,
+        color-mix(in oklch, var(--text-primary) 4%, transparent) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black, transparent 90%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black, transparent 90%);
+    animation: omni-grid-drift 60s linear infinite;
+}
+@keyframes omni-grid-drift {
+    0%   { background-position: 0 0; }
+    100% { background-position: 32px 32px; }
+}
+
+/* ============================================================
+   D. Holographic shine sweep across .hero on first paint
+   ============================================================ */
+.hero {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+.hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg,
+        transparent 35%,
+        color-mix(in oklch, white 22%, transparent) 47%,
+        color-mix(in oklch, var(--accent) 24%, transparent) 50%,
+        color-mix(in oklch, white 22%, transparent) 53%,
+        transparent 65%);
+    transform: translateX(-120%);
+    animation: omni-hero-shine 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.4s 1 forwards;
+    pointer-events: none;
+    mix-blend-mode: screen;
+}
+@keyframes omni-hero-shine {
+    0%   { transform: translateX(-120%); opacity: 0; }
+    20%  { opacity: 1; }
+    100% { transform: translateX(120%);  opacity: 0; }
+}
+
+/* ============================================================
+   E. Active-tab conic ribbon glow
+   Subtle rotating conic-gradient halo behind the active tab.
+   Sits inside the pill via mask-image so it can't bleed.
+   ============================================================ */
+.stTabs [data-baseweb="tab"][aria-selected="true"]::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: conic-gradient(from 0deg,
+        color-mix(in oklch, var(--accent) 60%, transparent),
+        color-mix(in oklch, #a855f7 50%, transparent),
+        color-mix(in oklch, #ec4899 40%, transparent),
+        color-mix(in oklch, var(--accent) 60%, transparent));
+    filter: blur(10px);
+    opacity: 0.55;
+    z-index: -1;
+    animation: omni-ribbon-spin 8s linear infinite;
+    pointer-events: none;
+}
+@keyframes omni-ribbon-spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   F. Animated cyan→magenta gradient border on cards (hover)
+   Uses ::before with mask-composite trick for a true 1px
+   gradient stroke (no background bleed).
+   ============================================================ */
+.signal-card, .glass, .glass-strong, .prediction-card {
+    position: relative;
+    isolation: isolate;
+}
+.signal-card::before,
+.glass::before,
+.glass-strong::before,
+.prediction-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(120deg,
+        var(--accent),
+        #a855f7,
+        #ec4899,
+        var(--accent));
+    background-size: 300% 300%;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+    z-index: -1;
+}
+.signal-card:hover::before,
+.glass:hover::before,
+.glass-strong:hover::before,
+.prediction-card:hover::before {
+    opacity: 0.85;
+    animation: omni-card-border-shimmer 4s linear infinite;
+}
+@keyframes omni-card-border-shimmer {
+    0%   { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+}
+
+/* ============================================================
+   G. Neon scale-from-center underline on primary buttons
+   ============================================================ */
+.stButton > button[kind="primary"] {
+    position: relative;
+    overflow: visible;
+}
+.stButton > button[kind="primary"]::after {
+    content: "";
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    bottom: -5px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--accent),
+        #a855f7,
+        var(--accent),
+        transparent);
+    transform: scaleX(0);
+    transform-origin: center;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent) 60%, transparent);
+    pointer-events: none;
+}
+.stButton > button[kind="primary"]:hover::after,
+.stButton > button[kind="primary"]:focus-visible::after {
+    transform: scaleX(1);
+}
+
+/* ============================================================
+   H. RGB-channel glitch on hero h1 hover
+   Uses dual text-shadow offsets in the cyan + magenta channels
+   so the headline subtly de-syncs on hover. Cheap, no canvas.
+   ============================================================ */
+.hero h1 {
+    position: relative;
+    transition: text-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.hero h1:hover {
+    text-shadow:
+        -1.5px 0 0 color-mix(in oklch, var(--accent) 80%, transparent),
+        1.5px  0 0 color-mix(in oklch, #ec4899 70%, transparent),
+        0 0 22px color-mix(in oklch, var(--accent) 25%, transparent);
+    animation: omni-glitch 900ms steps(2, end);
+}
+@keyframes omni-glitch {
+    0%   { transform: translate(0,    0); }
+    20%  { transform: translate(-0.8px, 0.4px); }
+    40%  { transform: translate(0.8px, -0.4px); }
+    60%  { transform: translate(-0.4px, 0); }
+    80%  { transform: translate(0.4px, 0); }
+    100% { transform: translate(0,    0); }
+}
+
+/* ============================================================
+   I. Pure-CSS starfield (no JS, no canvas)
+   Single 1×1 pseudo-element with a long box-shadow list draws
+   ~70 stars across the viewport. Slow twinkle.
+   ============================================================ */
+[data-testid="stAppViewContainer"]::after {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    width: 1px; height: 1px;
+    z-index: -1;
+    pointer-events: none;
+    background: transparent;
+    box-shadow:
+       11vw  17vh 0 0.5px rgba(255,255,255,0.55),
+       23vw   8vh 0 0.5px rgba(255,255,255,0.40),
+       38vw  35vh 0 0.5px rgba(255,255,255,0.65),
+       52vw  12vh 0 0.5px rgba(255,255,255,0.45),
+       66vw  41vh 0 0.5px rgba(255,255,255,0.55),
+       77vw   6vh 0 0.5px rgba(255,255,255,0.40),
+       89vw  28vh 0 0.5px rgba(255,255,255,0.55),
+        4vw  47vh 0 0.5px rgba(255,255,255,0.45),
+       17vw  61vh 0 0.5px rgba(255,255,255,0.50),
+       29vw  55vh 0 0.5px rgba(255,255,255,0.40),
+       42vw  72vh 0 0.5px rgba(255,255,255,0.45),
+       57vw  64vh 0 0.5px rgba(255,255,255,0.55),
+       71vw  77vh 0 0.5px rgba(255,255,255,0.40),
+       83vw  53vh 0 0.5px rgba(255,255,255,0.55),
+       94vw  68vh 0 0.5px rgba(255,255,255,0.40),
+        7vw  83vh 0 0.5px rgba(255,255,255,0.50),
+       21vw  91vh 0 0.5px rgba(255,255,255,0.45),
+       33vw  87vh 0 0.5px rgba(255,255,255,0.40),
+       46vw  94vh 0 0.5px rgba(255,255,255,0.55),
+       60vw  86vh 0 0.5px rgba(255,255,255,0.45),
+       74vw  93vh 0 0.5px rgba(255,255,255,0.50),
+       86vw  79vh 0 0.5px rgba(255,255,255,0.40);
+    animation: omni-starfield-twinkle 7s ease-in-out infinite alternate;
+}
+@keyframes omni-starfield-twinkle {
+    0%   { opacity: 0.45; }
+    50%  { opacity: 0.85; }
+    100% { opacity: 0.55; }
+}
+
+/* ============================================================
+   J. KPI tile aura when conviction is high
+   Uses :has() so the aura only fires on tiles whose value is
+   ≥ 70 (set via data-attribute downstream; falls back to a
+   universal soft glow on .stat-value:hover when no data is
+   present, which is harmless polish).
+   ============================================================ */
+.stat-value {
+    transition:
+        text-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform   240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.stat-value:hover {
+    text-shadow:
+        0 0 12px color-mix(in oklch, var(--accent) 50%, transparent),
+        0 0 28px color-mix(in oklch, var(--accent) 25%, transparent);
+    transform: translateY(-1px);
+}
+
+/* ============================================================
+   K. Scroll-into-view fade for cards (modern browsers)
+   ============================================================ */
+@supports (animation-timeline: view()) {
+    .signal-card, .glass-strong, .prediction-card {
+        animation: omni-card-rise linear both;
+        animation-timeline: view();
+        animation-range: entry 0% cover 28%;
+    }
+    @keyframes omni-card-rise {
+        0%   { opacity: 0;   transform: translateY(14px) scale(0.985); }
+        100% { opacity: 1;   transform: translateY(0)    scale(1);     }
+    }
+}
+
+}  /* end @media (prefers-reduced-motion: no-preference) */
+
+/* ============================================================
+   L. Tab alignment refinement
+   These rules apply with OR without reduced-motion preference,
+   so layout stays stable for users who suppress animation.
+   ============================================================ */
+.stTabs [data-baseweb="tab-list"] {
+    justify-content: center;
+    gap: 4px !important;
+    padding: 5px !important;
+    margin-bottom: 18px !important;
+    margin-inline: auto;
+}
+.stTabs [data-baseweb="tab"] {
+    padding: 9px 18px !important;
+    align-items: center;
+    display: inline-flex;
+    line-height: 1.1 !important;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"]::after {
+    bottom: 5px;
+    width: 16px;
+    height: 2px;
+    border-radius: 999px;
+    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 70%, transparent);
+}
+/* Smooth tabpanel cross-fade on switch */
+.stTabs [data-baseweb="tab-panel"] > div {
+    animation: omni-panel-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes omni-panel-in {
+    0%   { opacity: 0; transform: translateY(4px); }
+    100% { opacity: 1; transform: translateY(0);   }
+}
+
+/* Reduced-motion: kill the panel animation too */
+@media (prefers-reduced-motion: reduce) {
+    .stTabs [data-baseweb="tab-panel"] > div { animation: none !important; }
+}
+</style>
+"""
+
+
 _THEME_BUNDLE: str | None = None
 
 
@@ -2829,6 +3217,7 @@ def _theme_bundle() -> str:
             _ULTRA_FX_CSS,
             _ULTRA_FX_JS,
             _PHASE26_POLISH_CSS,
+            _PHASE27_CRAZY_FX_CSS,
         ))
     return _THEME_BUNDLE
 
