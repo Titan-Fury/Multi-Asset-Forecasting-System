@@ -2600,6 +2600,216 @@ _ULTRA_FX_JS = """
 _THEME_BUNDLE: str | None = None
 
 
+_PHASE26_POLISH_CSS = """
+<style>
+/* ============================================================
+   Phase 26 — final polish layer
+   ------------------------------------------------------------
+   Sits LAST in the bundle so it wins specificity ties on the
+   common interactive surfaces (buttons, selectbox, focus rings,
+   card hover, scrollbars). Strictly additive — no existing
+   selector is overridden destructively, only refined.
+
+   Design intent:
+     - Smoother motion (modern easing, no jank on hover)
+     - Visible accessible focus rings on every interactive
+     - Subtle elevation cue on hoverable cards
+     - Refined scrollbars (thin, accent on hover)
+     - Honors prefers-reduced-motion
+   ============================================================ */
+
+:root {
+    /* Motion scale */
+    --motion-fast: 120ms;
+    --motion-base: 180ms;
+    --motion-slow: 280ms;
+    --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Elevation scale (composed with the existing tokens) */
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06);
+    --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.08);
+
+    /* Focus ring (uses live --accent so it adapts per theme) */
+    --ring: 0 0 0 2px var(--accent),
+            0 0 0 6px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
+        --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+        --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.45), 0 3px 8px rgba(0, 0, 0, 0.30);
+        --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.55), 0 6px 16px rgba(0, 0, 0, 0.35);
+    }
+}
+
+/* ---- Focus rings (accessibility + polish) ---- */
+.stButton > button:focus-visible,
+[data-testid="stSelectbox"] [data-baseweb="select"]:focus-within,
+.stTextInput > div > div:focus-within,
+.stTextArea > div > div:focus-within,
+[data-baseweb="tab"]:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+    outline: none !important;
+    box-shadow: var(--ring) !important;
+    transition: box-shadow var(--motion-fast) var(--ease-out) !important;
+}
+
+/* ---- Buttons: subtle lift on hover, snap on press ---- */
+.stButton > button {
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        border-color     var(--motion-fast) var(--ease-out),
+        box-shadow       var(--motion-fast) var(--ease-out),
+        transform        var(--motion-fast) var(--ease-out) !important;
+    will-change: transform, box-shadow;
+}
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+.stButton > button:active {
+    transform: translateY(0);
+    box-shadow: var(--shadow-xs);
+    transition-duration: 80ms !important;
+}
+.stButton > button[kind="primary"]:hover {
+    box-shadow:
+        var(--shadow-sm),
+        0 0 0 1px color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+/* ---- Selectbox: refined dropdown ---- */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    transition:
+        border-color var(--motion-fast) var(--ease-out),
+        box-shadow   var(--motion-fast) var(--ease-out) !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"]:hover > div {
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border-strong)) !important;
+}
+[role="listbox"], [data-baseweb="popover"] [role="listbox"] {
+    border-radius: var(--r-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    overflow: hidden;
+    animation: omni-pop-in 140ms var(--ease-out);
+}
+[role="listbox"] [role="option"] {
+    transition:
+        background-color var(--motion-fast) var(--ease-out),
+        color            var(--motion-fast) var(--ease-out) !important;
+    border-radius: 6px;
+    margin: 2px 6px;
+    padding-inline: 10px !important;
+}
+[role="listbox"] [role="option"]:hover,
+[role="listbox"] [role="option"][aria-selected="true"] {
+    background: color-mix(in oklch, var(--accent) 14%, transparent) !important;
+}
+
+@keyframes omni-pop-in {
+    0%   { opacity: 0; transform: translateY(-4px) scale(0.985); }
+    100% { opacity: 1; transform: translateY(0)    scale(1);     }
+}
+
+/* ---- Cards: depth on hover (interactive cards only) ---- */
+.signal-card, .glass, .glass-strong, .prediction-card {
+    transition:
+        box-shadow   var(--motion-base) var(--ease-out),
+        border-color var(--motion-base) var(--ease-out),
+        transform    var(--motion-base) var(--ease-out) !important;
+}
+a:hover .signal-card,
+button:hover .signal-card,
+.signal-card:focus-within {
+    box-shadow: var(--shadow-md) !important;
+    transform: translateY(-1px);
+}
+
+/* ---- Tabs: smooth indicator slide ---- */
+[data-baseweb="tab-list"] {
+    border-bottom: 1px solid var(--border-subtle) !important;
+}
+[data-baseweb="tab"] {
+    transition:
+        color           var(--motion-base) var(--ease-out),
+        background-color var(--motion-base) var(--ease-out) !important;
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+}
+[data-baseweb="tab"]:hover {
+    background: color-mix(in oklch, var(--accent) 8%, transparent) !important;
+}
+[data-baseweb="tab-highlight"] {
+    transition:
+        left  var(--motion-base) var(--ease-out),
+        width var(--motion-base) var(--ease-out) !important;
+    background: var(--accent) !important;
+    height: 2px !important;
+    border-radius: 2px;
+}
+
+/* ---- Scrollbars (Webkit + Firefox) ---- */
+* { scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--text-muted) 35%, transparent) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--text-muted) 30%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+    transition: background var(--motion-base) var(--ease-out);
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--accent) 55%, transparent);
+    background-clip: content-box;
+}
+
+/* ---- Pills: tighter, more chip-like ---- */
+.pill {
+    line-height: 1.25 !important;
+    letter-spacing: 0.02em;
+    transition:
+        background var(--motion-fast) var(--ease-out),
+        color      var(--motion-fast) var(--ease-out) !important;
+}
+
+/* ---- Caret + selection ---- */
+::selection {
+    background: color-mix(in oklch, var(--accent) 35%, transparent);
+    color: var(--text-primary);
+}
+
+/* ---- Number inputs: tabular for stat-feel ---- */
+.stNumberInput input,
+.stTextInput input[inputmode="numeric"] {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- Toast tweaks: don't blow into the viewport ---- */
+[data-testid="stToast"] {
+    border-radius: var(--r-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* ---- Reduced motion: kill all polish transitions ---- */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+</style>
+"""
+
+
 def _theme_bundle() -> str:
     """Concatenate every CSS/JS chunk into a single markdown blob.
 
@@ -2618,6 +2828,7 @@ def _theme_bundle() -> str:
             _ULTRA_FX_SVG_DEFS,
             _ULTRA_FX_CSS,
             _ULTRA_FX_JS,
+            _PHASE26_POLISH_CSS,
         ))
     return _THEME_BUNDLE
 
