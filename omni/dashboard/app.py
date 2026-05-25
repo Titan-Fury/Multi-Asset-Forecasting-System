@@ -289,10 +289,35 @@ def _suggest_options(query: str) -> list[str]:
     venue, and the dot rendered as garbage on some Windows fonts. Now uses
     a single em-dash separator and a left-aligned two-column layout.
 
-    Uses multi-source live search (Yahoo + NSE + CoinGecko) when query is
-    long enough; falls back to curated list for empty / very-short queries.
+    Phase 26 — empty-query path no longer returns curated names. Instead
+    we surface the user's own search history (recent + frequent, deduped,
+    recent-first) so the selectbox starts empty for first-time users and
+    grows as they actually use the tool. Non-empty queries still hit the
+    multi-source live search via `suggestions(query)`.
     """
-    sugs = suggestions(query or "", k=15)
+    if not (query and query.strip()):
+        # Default dropdown = the user's own history (no pre-loaded picks).
+        try:
+            from omni.dashboard import searchhistory as _sh
+            recent = _sh.list_recent(limit=8) or []
+            freq = _sh.list_frequent(limit=4) or []
+        except Exception:  # noqa: BLE001
+            return []
+        seen: set[str] = set()
+        out: list[str] = []
+        for entry in (*recent, *freq):
+            tk = str(entry.get("ticker", "")).strip()
+            if not tk or tk in seen:
+                continue
+            seen.add(tk)
+            name = str(entry.get("display_name") or tk)
+            name = name[:60] + "…" if len(name) > 60 else name
+            # Leading ↻ marks history-derived rows; _parse_label() splits
+            # on the em-dash so the prefix has no effect on resolution.
+            out.append(f"↻ {tk:<14}  —  {name}")
+        return out
+
+    sugs = suggestions(query, k=15)
     out = []
     for s in sugs:
         # Trim long names
@@ -306,11 +331,16 @@ def _parse_label(label: str) -> str:
     """Extract the ticker from a 'TICKER  —  name' label, or return as-is.
     Tolerates the legacy '·' separator for any cached labels still in
     session_state from the pre-24.16 format.
+    Also tolerates the Phase 26 history-prefix '↻ '.
     """
-    sep = "—" if "—" in label else ("·" if "·" in label else "")
+    s = (label or "").lstrip()
+    # Strip the optional history marker so resolution sees the bare ticker.
+    if s.startswith("↻"):
+        s = s[1:].lstrip()
+    sep = "—" if "—" in s else ("·" if "·" in s else "")
     if sep:
-        return label.split(sep, 1)[0].strip()
-    return label.strip()
+        return s.split(sep, 1)[0].strip()
+    return s.strip()
 
 
 def _render_history_pills(entries: list[dict], *, prefix: str,

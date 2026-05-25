@@ -364,18 +364,14 @@ def suggestions(query: str, k: int = 10) -> list[Resolution]:
         2. ticker substring match
         3. name prefix match
         4. name substring match
+
+    Phase 26 — empty-query callers receive an empty list. The dashboard
+    layer is responsible for surfacing default suggestions (recent /
+    frequent search history) so the selectbox does not pre-load curated
+    names the user never asked for.
     """
     if not query or not query.strip():
-        # default: top-of-list previews per asset class
-        out: list[Resolution] = []
-        seen = set()
-        for ac in ("us", "india", "crypto", "fx"):
-            for t, a, name, _, _ in _LOOKUP:
-                if a == ac and (t, a) not in seen:
-                    out.append(Resolution(t, a, name, True))
-                    seen.add((t, a))
-                    break
-        return out[:k]
+        return []
 
     ql = query.strip().lower()
     qn = _norm(query.strip())
