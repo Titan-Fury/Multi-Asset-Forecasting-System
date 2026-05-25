@@ -133,6 +133,29 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
             total += len(df)
             log.info(f"newsapi {t}: {len(df)} articles")
 
+    # Currents per-ticker — 15-day max range / 600 req/day free tier; fills
+    # the gap NewsAPI's 24h-only free window leaves on quiet days. Config-
+    # gated like every other source so a missing key silently no-ops.
+    if cfg.get("news", {}).get("currents", {}).get("enabled", True):
+        try:
+            from omni.ingest.sources import currents as _currents
+            for t in tickers_list:
+                try:
+                    df = _normalize(_currents.news(
+                        t, lookback_days=min(max(lookback_days, 7), 15)))
+                except Exception as exc:  # noqa: BLE001
+                    log.debug(f"currents {t}: {exc}")
+                    continue
+                if df.empty:
+                    continue
+                tiers.save_raw(df, source="news_currents", asset_class="all",
+                                ticker=t, dedup_cols=["url"])
+                combined_parts.append(df)
+                total += len(df)
+                log.info(f"currents {t}: {len(df)} articles")
+        except Exception:  # noqa: BLE001
+            log.debug("currents source not importable; skipping")
+
     # RSS (global, store under shared 'global' key)
     if cfg.get("news", {}).get("rss", {}).get("enabled"):
         feeds = cfg["news"]["rss"].get("feeds", [])

@@ -18,6 +18,7 @@ import pandas as pd
 from omni.ingest.fundamentals import fetch_fundamentals as _yf_fundamentals
 from omni.ingest.prices import fetch_prices as _yf_prices
 from omni.ingest.sources import (
+    currents as _currents,
     edgar as _edgar,
     fmp as _fmp,
     gdelt as _gdelt,
@@ -191,6 +192,15 @@ def _news_combined(asset_class: str, ticker: str, display_name: str
     nws = _newsapi.news(ticker, display_name)
     if not nws.empty:
         sources.append("newsapi"); parts.append(nws.assign(sent_score=np.nan))
+    # Currents — 90-day historical lookback fills the gap NewsAPI's 24h free
+    # window leaves on quiet-news days, especially for small-cap tickers.
+    try:
+        cur = _currents.news(ticker, display_name=display_name)
+        if cur is not None and not cur.empty:
+            sources.append("currents")
+            parts.append(cur.assign(sent_score=np.nan))
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"currents fetch failed {ticker}: {exc}")
     mar = _marketaux.news(ticker, asset_class=asset_class)
     if not mar.empty:
         sources.append("marketaux"); parts.append(mar)

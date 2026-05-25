@@ -479,7 +479,7 @@ def provenance_strip(prov: dict) -> None:
 
     prices_expected = ["yfinance", "polygon"]
     fund_expected = ["yfinance", "fmp"]
-    news_expected = ["newsapi", "marketaux", "gdelt", "stocktwits"]
+    news_expected = ["newsapi", "currents", "marketaux", "gdelt", "stocktwits"]
 
     html = "<div class='glass-card' style='padding:10px 14px;margin:10px 0'>"
     html += (
