@@ -68,24 +68,37 @@ def prepare_xy(df: pd.DataFrame, *, target: str = "fwd_dir_5d"
 
 
 def walkforward_splits(dates: pd.Series, *, n_folds: int = 5,
-                       min_train: int = 252) -> Iterable[tuple[np.ndarray, np.ndarray]]:
+                       min_train: int = 252,
+                       embargo_days: int = 0) -> Iterable[tuple[np.ndarray, np.ndarray]]:
     """Yield (train_idx, test_idx) tuples in chronological order.
 
     Each fold's test window is the next slab; train is everything before it.
+
+    Phase 28 — `embargo_days` skips a buffer between train_end and test_start
+    so that fwd-H labels at the train boundary don't leak into the test fold.
+    Default 0 keeps backward compatibility; `walkforward_fit` defaults to
+    `horizon_days + 1` (typically 6 for 5d targets) which is the textbook
+    purged-CV embargo.
     """
     order = np.argsort(dates.values)
     n = len(order)
     if n <= min_train + n_folds:
         raise ValueError(f"not enough rows ({n}) for {n_folds} folds")
     fold_size = (n - min_train) // n_folds
+    embargo = max(0, int(embargo_days))
     for k in range(n_folds):
         train_end = min_train + k * fold_size
-        test_start = train_end
+        test_start = train_end + embargo
         test_end = min(n, test_start + fold_size)
         if test_end <= test_start:
             break
-        train_idx = order[:train_end]
+        # Drop the last `embargo` rows from the train side too — those rows'
+        # forward labels span into the test window and would leak across the
+        # gap if we kept them.
+        train_idx = order[: max(0, train_end - embargo)]
         test_idx = order[test_start:test_end]
+        if len(train_idx) == 0 or len(test_idx) == 0:
+            continue
         yield train_idx, test_idx
 
 
@@ -179,8 +192,14 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
                     n_folds: int = 5, min_train: int = 504,
                     inner_val_frac: float = 0.2,
                     xgb_params: dict | None = None,
-                    keep_models: bool = False) -> WalkForwardResult:
-    """Walk-forward fit. Requires `df` to have a `date` column."""
+                    keep_models: bool = False,
+                    embargo_days: int | None = None) -> WalkForwardResult:
+    """Walk-forward fit. Requires `df` to have a `date` column.
+
+    Phase 28 — `embargo_days` defaults to `horizon_days + 1` (inferred from
+    the target column name), preventing label leakage at the train/test
+    boundary that previously inflated fold AUCs.
+    """
     try:
         from xgboost import XGBClassifier
         from sklearn.calibration import CalibratedClassifierCV
@@ -233,8 +252,19 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         # monotone_constraints we honour theirs verbatim.
         params.update(xgb_params)
 
+    # Phase 28 — derive horizon from the target column for the default
+    # embargo (e.g. fwd_dir_5d -> 5d -> embargo 6). Caller can override
+    # with embargo_days explicitly when needed (0 = legacy behaviour).
+    if embargo_days is None:
+        import re as _re
+        m = _re.search(r"_(\d+)d$", str(target))
+        horizon = int(m.group(1)) if m else 5
+        embargo_days = horizon + 1
+
     res = WalkForwardResult(feature_cols=feat_cols)
-    for k, (tr_idx, te_idx) in enumerate(walkforward_splits(dates, n_folds=n_folds, min_train=min_train)):
+    for k, (tr_idx, te_idx) in enumerate(walkforward_splits(
+            dates, n_folds=n_folds, min_train=min_train,
+            embargo_days=embargo_days)):
         # Inner split: last 20% of train window for calibration (time-ordered)
         n_inner = max(1, int(len(tr_idx) * inner_val_frac))
         inner_train = tr_idx[:-n_inner]
