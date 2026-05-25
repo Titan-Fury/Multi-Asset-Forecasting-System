@@ -125,9 +125,31 @@ def _last_row_features(bundle: LookupBundle) -> pd.DataFrame:
 def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
                         ) -> np.ndarray:
     """Reindex one row to the universal model's feature_cols, fill NaN with
-    training-time medians."""
+    training-time medians.
+
+    Phase 28 — also surface a one-line WARN when a `*_pct` (cross-sectional
+    rank) column ends up filled by the median rather than carrying a real
+    value. That's the symptom of the inference-time rank-collapse bug
+    (`features_inline._load_recent_pool_slice` returned None / lake missing).
+    Pure observability: doesn't change the returned array.
+    """
     aligned = X_one.reindex(columns=um.feature_cols)
     medians = um.medians.reindex(um.feature_cols)
+    # Spot-check `*_pct` columns BEFORE fillna so we can warn on collapse.
+    try:
+        pct_cols = [c for c in um.feature_cols if c.endswith("_pct")]
+        if pct_cols:
+            row = aligned.iloc[0] if len(aligned) >= 1 else None
+            if row is not None:
+                missing = [c for c in pct_cols if pd.isna(row.get(c))]
+                if missing and len(missing) == len(pct_cols):
+                    # All cross-sectional ranks NaN — full collapse.
+                    log.warning(
+                        f"_align: ALL {len(pct_cols)} cross-sectional rank "
+                        f"columns NaN at inference; lake slice unavailable?"
+                    )
+    except Exception:  # noqa: BLE001
+        pass
     aligned = aligned.fillna(medians).fillna(0.0)
     return aligned.to_numpy(dtype=float)
 
@@ -1234,6 +1256,42 @@ def deep_analysis(ticker: str, asset_class: str,
                 f"good={n_good}/{n_total} q={fold_quality:.2f} "
                 f"(universal unavailable, no shrink applied)"
             )
+
+    # ---- Phase 28 — precision-weighted blend refinement -------------------
+    # Inverse-variance weighting between proba_deep and proba_universal,
+    # using AUC-edge as the precision proxy. The conformal interval widths
+    # would be identical here (same ticker, same realised vol), so widths
+    # don't discriminate between the two predictions — but their AUC edges
+    # over random DO. Higher AUC -> lower effective variance -> heavier
+    # weight in the blend. This is the principled second-pass refinement
+    # on top of fold-quality + sample-size shrinkage above.
+    try:
+        if proba_universal is not None and fold_aucs:
+            mean_fold_auc = float(np.mean(fold_aucs))
+            uni_auc = float(getattr(um, "oof_auc", None) or 0.5)
+            edge_d = max(0.0, mean_fold_auc - 0.5)
+            edge_u = max(0.0, uni_auc - 0.5)
+            denom = edge_d + edge_u
+            if denom > 1e-6:
+                w_d = edge_d / denom
+                w_u = edge_u / denom
+                refined = w_d * proba_deep + w_u * proba_universal
+                # Average the existing shrinkage-blended `proba` with the
+                # AUC-edge-weighted `refined` 50/50 — this keeps the
+                # sample-size + fold-quality information from the prior
+                # stages while adding the skill signal. Pure refinement,
+                # never moves the prediction by more than 50% of the
+                # AUC-edge correction.
+                old_proba = proba
+                proba = 0.5 * proba + 0.5 * refined
+                log.info(
+                    f"deep_analysis precision-blend: "
+                    f"mean_fold_auc={mean_fold_auc:.3f} uni_auc={uni_auc:.3f} "
+                    f"w_deep={w_d:.2f} w_univ={w_u:.2f} "
+                    f"refined={refined:.3f} {old_proba:.3f}->{proba:.3f}"
+                )
+    except Exception as exc:  # noqa: BLE001
+        log.debug(f"deep_analysis precision-blend skipped: {exc}")
 
     card = _build_card(bundle, full, proba,
                        model_kind="walk_forward_per_ticker", fold_aucs=fold_aucs)
