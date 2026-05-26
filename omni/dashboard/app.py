@@ -1966,7 +1966,13 @@ def _render_predict_tab() -> None:
             # custom CSS classes; if those ever fail to load the spinner
             # still gives the user a clear "we're working" signal so the
             # tab never looks frozen.
-            with st.spinner(f"Deep analysis · {res.ticker} (~15s)…"):
+            # Phase 28.2 — explicit stages + ETA in the label so users
+            # whose OS has Reduced Motion enabled (which kills the CSS
+            # shimmer) still get a clear "actively working" cue.
+            with st.spinner(
+                f"Deep analysis · {res.ticker} — fetching data → walk-forward "
+                f"fit → conformal calibration → explanation. ETA ~15-25s."
+            ):
                 card_dict = predict_via_api(res.ticker, res.asset_class,
                                              display_name=res.display_name, deep=True)
         except Exception as exc:  # noqa: BLE001
@@ -1982,7 +1988,11 @@ def _render_predict_tab() -> None:
         progress_slot, skeleton_slot = _show_loading(f"Predicting {res.ticker}")
         try:
             # Phase 24.21 — st.spinner backstop (see comment above).
-            with st.spinner(f"Predicting {res.ticker} · fetching live data + scoring…"):
+            # Phase 28.2 — explicit stages + ETA in the label.
+            with st.spinner(
+                f"Predicting {res.ticker} — yfinance prices → features → "
+                f"regime stack → conformal interval → verdict. ETA ~5-12s."
+            ):
                 card_dict = predict_via_api(res.ticker, res.asset_class,
                                              display_name=res.display_name, deep=False)
         except Exception as exc:  # noqa: BLE001

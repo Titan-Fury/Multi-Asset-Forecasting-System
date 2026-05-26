@@ -964,18 +964,21 @@ footer { visibility: hidden; }
      - 2px top progress bar with infinite slide for indeterminate work
    ============================================================================= */
 
-/* Skeleton primitives — drop these into st.markdown() while waiting */
+/* Skeleton primitives — drop these into st.markdown() while waiting.
+   Phase 28.2: contrast bumped from 6%/12%/6% -> 12%/26%/12% so the wave
+   is clearly visible on dark themes. Previous contrast made the skeletons
+   look static and the page felt frozen even when animation was running. */
 .skel {
     display: block;
     background: linear-gradient(
         90deg,
-        color-mix(in oklch, var(--text-primary, #e6ecf5) 6%, transparent) 0%,
-        color-mix(in oklch, var(--text-primary, #e6ecf5) 12%, transparent) 50%,
-        color-mix(in oklch, var(--text-primary, #e6ecf5) 6%, transparent) 100%
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 12%, transparent) 0%,
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 26%, transparent) 50%,
+        color-mix(in oklch, var(--text-primary, #e6ecf5) 12%, transparent) 100%
     );
     background-size: 200% 100%;
     border-radius: 6px;
-    animation: skel-shimmer 1.4s linear infinite;
+    animation: skel-shimmer 1.2s linear infinite;
 }
 .skel-line   { height: 14px; width: 100%; margin: 6px 0; }
 .skel-line-sm{ height: 10px; width: 40%;  margin: 4px 0; }
@@ -988,36 +991,48 @@ footer { visibility: hidden; }
     100% { background-position: -200% 0; }
 }
 
-/* Top indeterminate progress bar — fixed 2px line at the very top edge */
+/* Top indeterminate progress bar — Phase 28.2: 3px tall (was 2px) and the
+   sliding glow widened from 38% -> 45% with a stronger box-shadow so the
+   progress signal is visible even on bright dashboards. */
 .top-progress {
     position: fixed;
     top: 0; left: 0; right: 0;
-    height: 2px;
+    height: 3px;
     z-index: 9999;
     overflow: hidden;
-    background: transparent;
+    background: color-mix(in oklch, var(--accent, #06b6d4) 8%, transparent);
     pointer-events: none;
 }
 .top-progress::before {
     content: "";
     display: block;
     height: 100%;
-    width: 38%;
+    width: 45%;
     background: linear-gradient(90deg,
         transparent,
         var(--accent, #06b6d4),
         color-mix(in oklch, var(--accent, #06b6d4) 60%, #8b5cf6),
         transparent);
     border-radius: 2px;
-    animation: top-progress-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    box-shadow: 0 0 8px color-mix(in oklch, var(--accent, #06b6d4) 50%, transparent);
+    animation: top-progress-slide 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    box-shadow: 0 0 12px color-mix(in oklch, var(--accent, #06b6d4) 70%, transparent);
 }
 @keyframes top-progress-slide {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(290%); }
+    0%   { transform: translateX(-120%); }
+    100% { transform: translateX(310%); }
 }
+/* Phase 28.2: when prefers-reduced-motion is on, the CSS animations would
+   otherwise be killed and the loading state looks frozen. Replace the
+   sliding glow with a static-but-clearly-visible accent band so the user
+   still gets a visible "we're working" affordance. The skeletons stay
+   visible at the new higher contrast. */
 @media (prefers-reduced-motion: reduce) {
-    .skel, .top-progress::before { animation: none !important; }
+    .skel { animation: none !important; opacity: 0.9; }
+    .top-progress::before {
+        animation: none !important;
+        width: 100%;
+        opacity: 0.85;
+    }
 }
 
 /* ---------------------------------------------------------------------------
