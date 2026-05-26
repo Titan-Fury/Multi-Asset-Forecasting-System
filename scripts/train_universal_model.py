@@ -244,29 +244,67 @@ def _half_life_for(spec: dict[int, float] | float, horizon: int) -> float:
 
 def _train_one_horizon(df: pd.DataFrame, used: list[str], *,
                          horizon: int, n_folds: int, min_train: int,
-                         half_life_years: float) -> dict:
-    """Fit + save one horizon model. Returns a stats dict."""
-    target = f"fwd_dir_{horizon}d"
-    if target not in df.columns:
-        log.warning(f"target {target} not in training frame; skip h={horizon}")
-        return {"horizon": horizon, "skipped": True, "reason": "no target column"}
+                         half_life_years: float,
+                         target_kind: str = "dir") -> dict:
+    """Fit + save one horizon model. Returns a stats dict.
 
-    sub = df.dropna(subset=[target]).copy()
+    Phase 28.3 — added `target_kind` parameter so single-mode honours
+    `--target tb` (was previously hardcoded to `fwd_dir_<H>d`, silently
+    ignoring the CLI flag). Mirrors the dispatch logic from the
+    stack-mode handler:
+        "dir" -> fwd_dir_<H>d, binary > 0  (legacy default)
+        "tb"  -> tb_label_<H>d, binary == 1; falls back to fwd_dir
+                 with a warning if augment_triple_barrier hasn't been run.
+    Recency weights are now passed through to walkforward_fit (was
+    silently dropped before this fix, making --half-life-years a no-op
+    in single mode).
+    """
+    sub = df.copy()
+
+    if target_kind == "tb":
+        tb_col = f"tb_label_{horizon}d"
+        if tb_col in sub.columns:
+            target = tb_col
+            sub = sub.dropna(subset=[target])
+            log.info(f"[h={horizon}] using TB labels: {target}, "
+                      f"binarising as (== +1)")
+            # Binarise tb_label ∈ {-1, 0, +1} into {0, 1} for the classifier.
+            sub[target] = (sub[target].astype(int) == 1).astype(int)
+        else:
+            log.warning(
+                f"[h={horizon}] tb_label missing; falling back to fwd_dir "
+                f"(run scripts/augment_triple_barrier.py to use TB labels)"
+            )
+            target = f"fwd_dir_{horizon}d"
+            if target not in sub.columns:
+                return {"horizon": horizon, "skipped": True,
+                          "reason": "no target column (tb and fwd_dir both missing)"}
+            sub = sub.dropna(subset=[target])
+    else:
+        target = f"fwd_dir_{horizon}d"
+        if target not in sub.columns:
+            log.warning(f"target {target} not in training frame; skip h={horizon}")
+            return {"horizon": horizon, "skipped": True, "reason": "no target column"}
+        sub = sub.dropna(subset=[target])
+
     if len(sub) < (n_folds + 1) * min_train // 2:
         log.warning(f"too few rows for h={horizon} ({len(sub)}); skip")
         return {"horizon": horizon, "skipped": True, "reason": "too few rows"}
 
-    # Recency weighting: rows further in the past get exponentially less weight
+    # Recency weighting: rows further in the past get exponentially less weight.
+    # Phase 28.3 — these are now passed through to walkforward_fit instead of
+    # being silently dropped.
     weights = (recency_weights(sub["date"], half_life_years=half_life_years)
                 if "date" in sub.columns else None)
 
     log.info(f"[h={horizon}] walk-forward fit on {sub.shape}, "
               f"folds={n_folds}, min_train={min_train}, "
-              f"recency_half_life={half_life_years}y")
+              f"recency_half_life={half_life_years}y, target={target}")
     res = walkforward_fit(
         sub, target=target,
         n_folds=n_folds, min_train=min_train,
         keep_models=True,
+        sample_weight=weights,
     )
     if not res.folds:
         log.error(f"[h={horizon}] no folds produced")
@@ -297,7 +335,8 @@ def _train_one_horizon(df: pd.DataFrame, used: list[str], *,
     path = model_registry.save_horizon(um, horizon)
     return {"horizon": horizon, "skipped": False,
              "rows": len(sub), "n_features": len(feat_cols),
-             "oof_auc": auc, "path": str(path)}
+             "oof_auc": auc, "path": str(path),
+             "target": target, "target_kind": target_kind}
 
 
 def main() -> int:
@@ -416,7 +455,8 @@ def main() -> int:
             r = _train_one_horizon(df, used, horizon=h,
                                       n_folds=args.n_folds,
                                       min_train=args.min_train,
-                                      half_life_years=_half_life_for(half_life_spec, h))
+                                      half_life_years=_half_life_for(half_life_spec, h),
+                                      target_kind=args.target)
         results.append(r)
         if r.get("skipped"):
             print(f"  h={h}: SKIPPED ({r.get('reason')})")
