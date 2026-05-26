@@ -165,16 +165,23 @@ def _magnitude_weights(df: pd.DataFrame, *, target: str) -> np.ndarray | None:
     real world; flipping correctly on a -8% bar is the entire game.
     Without this weighting the binary objective treats both equally.
 
-    Falls back to None (uniform weighting) when fwd_ret_<H>d isn't in
-    the frame, so existing callers that don't provide it still work.
+    Phase 28.3 — also recognises ``tb_label_<H>d`` targets so triple-
+    barrier training paths still get magnitude weighting (previously
+    they fell through to None and lost the focus signal).
+
+    Falls back to None (uniform weighting) when ``fwd_ret_<H>d`` isn't
+    in the frame, so existing callers that don't provide it still work.
     """
     h = "5"
-    if target.endswith("d") and target.startswith("fwd_dir_"):
-        # extract horizon from fwd_dir_<H>d
-        try:
-            h = target[len("fwd_dir_"):-len("d")] or "5"
-        except Exception:  # noqa: BLE001
-            h = "5"
+    if target.endswith("d"):
+        # Extract horizon from either fwd_dir_<H>d OR tb_label_<H>d.
+        for prefix in ("fwd_dir_", "tb_label_"):
+            if target.startswith(prefix):
+                try:
+                    h = target[len(prefix):-len("d")] or "5"
+                except Exception:  # noqa: BLE001
+                    h = "5"
+                break
     ret_col = f"fwd_ret_{h}d"
     if ret_col not in df.columns:
         return None
@@ -193,12 +200,20 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
                     inner_val_frac: float = 0.2,
                     xgb_params: dict | None = None,
                     keep_models: bool = False,
-                    embargo_days: int | None = None) -> WalkForwardResult:
+                    embargo_days: int | None = None,
+                    sample_weight: np.ndarray | None = None) -> WalkForwardResult:
     """Walk-forward fit. Requires `df` to have a `date` column.
 
     Phase 28 — `embargo_days` defaults to `horizon_days + 1` (inferred from
     the target column name), preventing label leakage at the train/test
     boundary that previously inflated fold AUCs.
+
+    Phase 28.3 — `sample_weight` is the caller-supplied per-row weight
+    vector (e.g. recency weights from the trainer). When provided, it is
+    combined MULTIPLICATIVELY with the magnitude-derived weights so a row
+    gets BOTH "this day mattered" magnitude focus AND "this is recent
+    enough to trust" recency emphasis. Length must equal len(df) BEFORE
+    the prepare_xy NaN-drop; alignment to X.index happens internally.
     """
     try:
         from xgboost import XGBClassifier
@@ -224,6 +239,36 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
 
     # Phase 24.22 — magnitude-aware sample weights (focus on bars that move).
     full_weights = _magnitude_weights(df.loc[X.index].copy(), target=target)
+
+    # Phase 28.3 — combine with caller-supplied recency weights when given.
+    # Element-wise product: a row only gets "high attention" from XGBoost if
+    # BOTH (a) its realised move was meaningful AND (b) it falls in a recent
+    # enough regime. Aligned to X.index (post-NaN-drop) the same way
+    # full_weights is.
+    if sample_weight is not None:
+        try:
+            recency_aligned = np.asarray(sample_weight, dtype=float)
+            # If caller passed pre-NaN-drop weights, slice to X.index.
+            if len(recency_aligned) == len(df):
+                # df.index might not be a positional range; use loc-by-label.
+                recency_aligned = (pd.Series(recency_aligned, index=df.index)
+                                     .loc[X.index].to_numpy())
+            elif len(recency_aligned) != len(X):
+                from omni.utils.logger import log as _log
+                _log.warning(
+                    f"walkforward_fit: sample_weight length {len(recency_aligned)} "
+                    f"matches neither df ({len(df)}) nor X ({len(X)}); ignoring"
+                )
+                recency_aligned = None
+
+            if recency_aligned is not None:
+                if full_weights is None:
+                    full_weights = recency_aligned
+                else:
+                    full_weights = full_weights * recency_aligned
+        except Exception as exc:  # noqa: BLE001
+            from omni.utils.logger import log as _log
+            _log.warning(f"walkforward_fit: sample_weight merge failed: {exc}")
 
     # Phase 24.22 — hyperparameter overhaul:
     #  - learning_rate 0.05 -> 0.03 with proportional n_estimators bump
