@@ -1,8 +1,10 @@
 """Currents News API live client.
 
-Free tier: 600 requests/day, 15-day max date range per request. The
+Free tier: 1000 requests/day, 15-day max date range per request. The
 15-day window is still ~15x what NewsAPI's free tier offers (24h), so
-small-cap tickers on quiet news days find articles via Currents.
+small-cap tickers on quiet news days find articles via Currents. The
+1000/day daily quota is high enough that no app-level rate-limiter is
+required for normal multi-ticker prediction runs.
 
 Sign up: https://currentsapi.services
 Key in env as CURRENTS_API_KEY.
