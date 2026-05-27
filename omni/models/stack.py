@@ -330,10 +330,76 @@ def fit_stack(
             # the stacked model output.
             pass
 
-    # Meta: train on OOF-stacked features (fill remaining NaNs with 0.5)
-    Z = np.column_stack([np.where(np.isnan(p), 0.5, p) for p in oof.values()])
+    # Meta: train on OOF-stacked features.
+    #
+    # Phase 28.4 — root-cause fix for the "stack underperforms single XGB"
+    # mystery flagged in the codebase review. Previously every NaN OOF
+    # prediction (typically from CatBoost / LightGBM failing on early
+    # small folds) was filled with 0.5, so the meta-LR learned that
+    # constant 0.5 means "this base is uncertain" — when in reality the
+    # base simply didn't run on those rows. The result: the meta-LR's
+    # decision boundary was shaped by the failure pattern of the early
+    # small folds, not by the bases' real OOF behaviour.
+    #
+    # Fix: train the meta-LR ONLY on rows where every retained base has
+    # a real (non-NaN) OOF prediction. Bases with too few real predictions
+    # (>= 30% NaN) are dropped from the meta entirely so they can't
+    # contaminate the boundary; everyone else is restricted to the
+    # intersection of their valid rows. Inference still calls every
+    # retained base — only the META's training set is masked.
+    base_names = list(oof.keys())
+    nan_share = {n: float(np.isnan(oof[n]).mean()) for n in base_names}
+    keep_bases = [n for n, s in nan_share.items() if s < 0.30]
+    dropped = [n for n in base_names if n not in keep_bases]
+    if dropped:
+        log.warning(
+            f"stack: dropping bases {dropped} from meta-LR "
+            f"(NaN share >= 30%): "
+            + ", ".join(f"{n}={nan_share[n]:.2%}" for n in dropped)
+        )
+    if not keep_bases:
+        # All bases failed too often — fall back to the legacy 0.5-fill
+        # behaviour so the stack at least produces a model. This is rare
+        # (only happens on extremely small training sets).
+        keep_bases = base_names
+        log.warning("stack: all bases over NaN threshold; falling back "
+                    "to 0.5-fill meta-LR")
+        Z_full = np.column_stack([np.where(np.isnan(oof[n]), 0.5, oof[n])
+                                    for n in keep_bases])
+        meta_mask = np.ones(len(y), dtype=bool)
+    else:
+        # Mask: rows where ALL retained bases have a non-NaN prediction.
+        meta_mask = np.ones(len(y), dtype=bool)
+        for n in keep_bases:
+            meta_mask &= ~np.isnan(oof[n])
+        Z_full = np.column_stack([oof[n] for n in keep_bases])
+
+    meta_train_n = int(meta_mask.sum())
+    log.info(
+        f"stack: meta-LR training on {meta_train_n}/{len(y)} rows "
+        f"({100.0 * meta_train_n / max(len(y), 1):.1f}%) "
+        f"with bases {keep_bases}"
+    )
+    Z = Z_full[meta_mask]
+    y_meta = y[meta_mask]
     meta = LogisticRegression(C=1.0, max_iter=200)
-    meta.fit(Z, y)
+    if len(set(y_meta)) >= 2 and len(y_meta) >= 50:
+        meta.fit(Z, y_meta)
+    else:
+        # Degenerate fallback: legacy 0.5-fill on full data.
+        log.warning(
+            f"stack: meta mask too small ({meta_train_n} rows) "
+            f"or single-class; reverting to 0.5-fill on full data"
+        )
+        Z_legacy = np.column_stack([np.where(np.isnan(oof[n]), 0.5, oof[n])
+                                      for n in keep_bases])
+        meta.fit(Z_legacy, y)
+    # `Z` (the dense, non-NaN stacked features over the full array) is
+    # used by the OOF-meta-AUC evaluation below. We keep the 0.5-fill
+    # for evaluation purposes only — the trained meta model itself was
+    # fit on the masked, leakage-clean subset above.
+    Z = np.column_stack([np.where(np.isnan(oof[n]), 0.5, oof[n])
+                           for n in keep_bases])
 
     # Honest OOF evaluation of the meta-learner: refit a meta on each fold's
     # OOF predictions only (using the same purged folds) so we don't report
