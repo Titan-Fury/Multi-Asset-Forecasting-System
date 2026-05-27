@@ -106,6 +106,35 @@ def build_features_inline(
     out["asset_class"] = asset_class
     out["date"] = pd.to_datetime(out["date"]).astype("datetime64[ns]")
 
+    # Phase 28.4 — per-row circuit-history features (India only). The
+    # training path (`omni.features.build.build_for_ticker`) calls
+    # `add_circuit_features` against the raw OHLC frame to produce 9
+    # feature columns: is_circuit_bar, circuit_hits_{5,20,60}d,
+    # circuit_lower_hits_20d, circuit_upper_hits_20d,
+    # consecutive_lock_days, days_since_last_lock,
+    # last_lock_direction_signed. Inference previously omitted this whole
+    # block; models with non-zero split importance on those features were
+    # being served the training-time median (a constant) at every live
+    # row. mask_circuit_labels is intentionally NOT called here — it
+    # operates on `fwd_*` label columns which the prediction path doesn't
+    # consume (is_target_col strips them from feature_cols at training
+    # time).
+    try:
+        from omni.features.circuit import add_circuit_features
+        ohlc_cols = [c for c in ("date", "open", "high", "low", "close",
+                                  "adj_close") if c in prices.columns]
+        if ohlc_cols and "date" in ohlc_cols:
+            ch = add_circuit_features(prices[ohlc_cols].copy(),
+                                        asset_class=asset_class)
+            ch_cols = [c for c in ch.columns
+                        if c not in ("open", "high", "low", "close", "adj_close")]
+            ch = ch[ch_cols]
+            ch["date"] = pd.to_datetime(ch["date"]).astype("datetime64[ns]")
+            out = out.merge(ch, on="date", how="left")
+    except Exception as exc:  # noqa: BLE001
+        from omni.utils.logger import log
+        log.warning(f"circuit features inline skipped: {exc}")
+
     # Fundamentals (latest <= date per row, only equities). Yfinance reports the
     # run date as today, but the daily price bar may end yesterday — so any
     # fundamentals stamped strictly in the future would merge_asof to NaN. Roll
