@@ -154,6 +154,21 @@ def build_features_inline(
                 left_on="date", right_on="run_date", direction="backward",
             )
 
+    # Phase 28.4 — quality composites (Sloan accruals, Piotroski F-Score,
+    # AFP QMJ). Training path runs `add_quality` immediately after the
+    # fundamentals merge so the composite formulas can read net_income,
+    # operating_cash_flow, etc. Inference previously omitted these three
+    # columns; the rubric scorer's QMJ rank and the model's piotroski
+    # split were both being served the training-time median. Crypto/FX
+    # produces all-NaN columns by design (matches training) so the
+    # universal schema stays stable.
+    try:
+        from omni.features.quality import add_quality
+        out = add_quality(out)
+    except Exception as exc:  # noqa: BLE001
+        from omni.utils.logger import log
+        log.warning(f"quality features inline skipped: {exc}")
+
     # Sentiment lagged +1 business day (leak-free), then forward-filled
     # so the most recent price row inherits the latest available sentiment.
     if sentiment is not None and not sentiment.empty:
