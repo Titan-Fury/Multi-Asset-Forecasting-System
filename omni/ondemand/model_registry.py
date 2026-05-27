@@ -96,6 +96,14 @@ def save_horizon(um: UniversalModel, horizon: int) -> Path:
         "metadata": metadata,
     }, blob)
     meta.write_text(json.dumps(metadata, indent=2))
+    # Phase 28.4 — feature contract sidecar so inference can detect schema
+    # drift loudly (raises FeatureContractMismatch) instead of silently
+    # median-filling missing columns and depressing live AUC.
+    try:
+        from omni.features.contract import write_contract
+        write_contract(blob, um.feature_cols)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(f"feature contract write skipped: {exc}")
     log.info(f"universal model saved (h={horizon}d) -> {blob} "
              f"(oof_auc={um.oof_auc}, n_train_rows={metadata['n_train_rows']})")
     return blob
