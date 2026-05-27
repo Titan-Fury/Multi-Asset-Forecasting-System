@@ -23,6 +23,13 @@ from omni.features import technical as _tech
 # instead of the legacy 0.5 placeholder. Cached 5 minutes to amortise
 # the parquet read across rapid-fire prediction calls.
 # ----------------------------------------------------------------------
+
+# Phase 28.4 — staleness gate. When the lake's latest date is more than
+# this many CALENDAR days behind today, refuse to use the slice (would
+# rank live row against stale peers) and fall through to the 0.5
+# placeholder. Roughly 7 trading days; generous enough for long
+# weekends and India holiday clusters.
+_MAX_SLICE_AGE_DAYS = 10
 def _load_recent_pool_slice(asset_class: str, *,
                               lookback_days: int = 14) -> "pd.DataFrame | None":
     """Return the latest `lookback_days` rows from the lake for cross-
@@ -54,6 +61,37 @@ def _load_recent_pool_slice(asset_class: str, *,
             if df is None or df.empty or "date" not in df.columns:
                 return None
             df["date"] = pd.to_datetime(df["date"])
+            # Phase 28.4 — freshness gate. The original implementation
+            # forced the live row's date to `df["date"].max()` regardless
+            # of how stale that max was, then ranked against peers from
+            # that stale date. When the daily orchestrator hadn't run for
+            # a week+, that meant ranking today's CIANAGRO against peers
+            # from a week ago — silently incorrect ranks that fed into
+            # ten or so `*_pct` features. We now refuse slices whose max
+            # date is more than `_MAX_SLICE_AGE_DAYS` calendar days behind
+            # today and let the caller fall through to the 0.5 placeholder
+            # path (which at least signals "no data" rather than "fake
+            # data"). The threshold is generous (10 calendar days, ~7
+            # trading days) so weekends / Diwali holidays don't trip it.
+            try:
+                from omni.utils.logger import log
+                max_dt = pd.Timestamp(df["date"].max())
+                today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+                age_days = max(0, int((today - max_dt.normalize()).days))
+                if age_days > _MAX_SLICE_AGE_DAYS:
+                    log.warning(
+                        f"_load_recent_pool_slice[{asset_class}]: latest "
+                        f"date {max_dt.date()} is {age_days}d old "
+                        f"(> {_MAX_SLICE_AGE_DAYS}d gate); refusing to "
+                        f"rank against stale peers, falling back to "
+                        f"0.5 placeholders"
+                    )
+                    return None
+            except Exception:  # noqa: BLE001
+                # Date arithmetic glitch (e.g. all-NaT) — be conservative
+                # and fall through with the slice; the existing code path
+                # handles edge cases below.
+                pass
             cutoff = df["date"].max() - pd.Timedelta(days=lookback_days)
             return df[df["date"] >= cutoff].reset_index(drop=True)
         except Exception:  # noqa: BLE001
