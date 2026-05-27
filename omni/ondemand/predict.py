@@ -486,6 +486,7 @@ def _build_card(
     model_kind: str,
     fold_aucs: list[float] | None = None,
     per_horizon_proba: dict[int, float] | None = None,
+    conformal: object | None = None,
 ) -> PredictionCard:
     last = feats_full.tail(1).copy()
     if last.empty:
@@ -667,14 +668,24 @@ def _build_card(
     # Conformal prediction interval (Phase 22 / M4): if a calibrator was
     # persisted alongside the universal model, use its 80% coverage band.
     # Otherwise fall back to the heuristic ±1σ envelope.
+    #
+    # Phase 28.4 — accept the calibrator from `_cached_models` via the
+    # `conformal` kwarg instead of re-loading the joblib from disk on
+    # every predict_ticker call (~3-6 ms saved per call, plus the
+    # avoided I/O contention). Falls back to the disk-load path when the
+    # caller didn't pass one (e.g. the per-ticker walk-forward
+    # `deep_analysis` route, which doesn't go through `_cached_models`).
     _conformal_used = False
     try:
-        from omni.models.conformal import ConformalIntervalCalibrator
-        from pathlib import Path as _P
-        import joblib as _jl
-        _cal_path = _P("data") / "models" / "conformal_h5.joblib"
-        if _cal_path.exists():
-            _cal: ConformalIntervalCalibrator = _jl.load(_cal_path)
+        _cal = conformal
+        if _cal is None:
+            from omni.models.conformal import ConformalIntervalCalibrator  # noqa: F401
+            from pathlib import Path as _P
+            import joblib as _jl
+            _cal_path = _P("data") / "models" / "conformal_h5.joblib"
+            if _cal_path.exists():
+                _cal = _jl.load(_cal_path)
+        if _cal is not None and hasattr(_cal, "widen"):
             _lo, _hi = _cal.widen(expected_move_pct, sigma_5d_pct)
             expected_low_pct = float(_lo)
             expected_high_pct = float(_hi)
@@ -1131,7 +1142,8 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
             log.debug(f"circuit history override skipped [{ticker}]: {exc}")
 
     card = _build_card(bundle, feats, proba, model_kind=kind,
-                        per_horizon_proba=per_horizon)
+                        per_horizon_proba=per_horizon,
+                        conformal=_conformal)
     if card is not None:
         card.circuit_risk_pct = circuit_pct
         card.circuit_risk_band = circuit_band_str
