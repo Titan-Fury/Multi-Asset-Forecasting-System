@@ -132,7 +132,39 @@ def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
     value. That's the symptom of the inference-time rank-collapse bug
     (`features_inline._load_recent_pool_slice` returned None / lake missing).
     Pure observability: doesn't change the returned array.
+
+    Phase 28.4 — also asserts the feature contract written at training time
+    (`omni.features.contract`). When the contract sidecar exists and the
+    produced frame is missing any required columns, logs a STRUCTURED ERROR
+    listing the missing columns. The function still returns a usable array
+    (legacy median-fill) so production keeps running, but the drift is no
+    longer silent — operators / CI now have a discoverable signal.
     """
+    # Phase 28.4 — feature-contract assertion (pre-fill, so missing columns
+    # haven't yet been silently masked by medians/zeros).
+    try:
+        from omni.features.contract import (
+            assert_contract,
+            FeatureContractMismatch,
+        )
+        from omni.ondemand import model_registry as _mr
+        blob, _meta = _mr._paths_for(int(getattr(um, "horizon_days", 5)))
+        try:
+            assert_contract(blob, X_one.columns)
+        except FeatureContractMismatch as exc:
+            # Don't break production — log structured details and fall
+            # through to median-fill. The point is *visibility*: this used
+            # to be a silent constant-fill of every missing column.
+            log.error(
+                f"_align: feature contract mismatch (h={um.horizon_days}d): "
+                f"{len(exc.missing)} columns missing from inference build "
+                f"(first 8: {exc.missing[:8]}); falling back to median-fill"
+            )
+    except Exception:  # noqa: BLE001
+        # Contract module / model_registry path lookup glitch; do not let
+        # an observability hook break scoring.
+        pass
+
     aligned = X_one.reindex(columns=um.feature_cols)
     medians = um.medians.reindex(um.feature_cols)
     # Spot-check `*_pct` columns BEFORE fillna so we can warn on collapse.
