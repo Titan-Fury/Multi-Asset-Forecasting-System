@@ -159,6 +159,21 @@ def build_features_inline(
         tg["date"] = pd.to_datetime(tg["date"]).astype("datetime64[ns]")
         out = out.merge(tg, on="date", how="left")
 
+    # Phase 28.4 — diff-encoding + lagged-realised-label features. The
+    # training path (`omni.features.build.build_for_ticker`) calls
+    # `add_diff_and_lagged` after the targets merge so `lag_real_fwd_dir_<H>d`
+    # can read fwd_dir_*. Inference previously skipped this step entirely,
+    # which meant the model's splits on those 7 columns were silently
+    # served the training-time median at every live row. With the schema
+    # contract (Phase 28.4) the absence would now surface as an error log
+    # line, but the proper fix is to actually produce the columns.
+    try:
+        from omni.features.diff_lagged import add_diff_and_lagged
+        out = add_diff_and_lagged(out, horizons=horizons)
+    except Exception as exc:  # noqa: BLE001
+        from omni.utils.logger import log
+        log.warning(f"diff_lagged inline failed: {exc}")
+
     # ---- step-2 high-impact feature additions ----
     # Order matters: vol-adjusted momentum needs ret_Hd, sentiment z needs sent_mean,
     # cross-sectional ranks need raw fundamentals + tech features, regime
