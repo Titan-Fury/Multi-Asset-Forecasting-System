@@ -281,6 +281,15 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     params = dict(
         n_estimators=800, max_depth=5, learning_rate=0.03,
         subsample=0.8, colsample_bytree=0.8,
+        # Phase 28.4 — colsample_bylevel forces feature subsampling at
+        # each tree LEVEL in addition to per-tree. Many of the universal
+        # model's 128 features are heavily co-linear (vol_5/vol_20/
+        # vol_ratio/atr_pct_14/parkinson_vol_20/gk_vol_20 are all
+        # volatility variants; ret_*d are all return horizons). Without
+        # colsample_bylevel, a tree that picks one of these at the root
+        # will keep splitting on the same family at every depth, wasting
+        # capacity. 0.7 forces diversification at each level.
+        colsample_bylevel=0.7,
         min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
         objective="binary:logistic", eval_metric="logloss",
         tree_method="hist", random_state=42,
