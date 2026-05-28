@@ -68,8 +68,17 @@ def triple_barrier(prices: pd.DataFrame,
                    horizons: tuple[int, ...] = (1, 5, 20),
                    pt_mult: float = 2.0,
                    sl_mult: float = 1.0,
-                   vol_window: int = 20) -> pd.DataFrame:
+                   vol_window: int = 40) -> pd.DataFrame:
     """Triple-barrier labels (de Prado, AFML §3.4).
+
+    Phase 28.4 — `vol_window` default changed from 20 to 40 trading days.
+    20-day rolling sigma is noisy for Indian mid-caps where intraday
+    range can swing dramatically across earnings windows. The shorter
+    window made the +/- pt_mult * sigma barriers themselves spiky,
+    producing TB labels that flipped between PT-hit / SL-hit / time-
+    expired in nearby rows for what was clearly the same regime. 40
+    days is a more stable estimator of the underlying vol while still
+    being short enough to track regime shifts at the multi-week scale.
 
     Instead of "did the price end up after H days", ask:
       "within the next H days, did price touch +pt_mult*sigma BEFORE
