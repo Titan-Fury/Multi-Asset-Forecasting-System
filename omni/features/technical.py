@@ -58,6 +58,12 @@ def compute(prices: pd.DataFrame) -> pd.DataFrame:
     out["ret_1d"] = ac.pct_change(1)
     out["ret_5d"] = ac.pct_change(5)
     out["ret_20d"] = ac.pct_change(20)
+    # Phase 28.4 — `ret_60d` was missing despite being referenced by
+    # `vol_adjusted_momentum.add_vol_adjusted_momentum` (it gates the
+    # production of `mom_vol_adj_60d`). Without ret_60d that column
+    # was always NaN at training and inference, costing the universal
+    # model a free 60-day momentum signal.
+    out["ret_60d"] = ac.pct_change(60)
     out["log_ret_1d"] = np.log(ac / ac.shift(1))
 
     # SMAs as DISTANCE from close (unitless). EMAs dropped — MACD captures
