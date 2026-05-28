@@ -278,8 +278,14 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     #  - reg_alpha 0 -> 0.5 (L1; ignores noise features as catalogue grew)
     #  - monotone_constraints (architectural insurance against wrong-sign
     #    learning on the circuit-distress features)
+    # Phase 28.4 — TB-label-tuned hyperparameters:
+    #  - max_depth 5 -> 6 (TB labels filter noisy bars; deeper trees
+    #    help once mask_circuit_labels has dropped the worst rows)
+    #  - min_child_weight 5 -> 3 (was raised for fwd_dir labels to
+    #    suppress noise rows; with TB labels the noise is already
+    #    filtered upstream, so the tighter setting was over-regularising)
     params = dict(
-        n_estimators=800, max_depth=5, learning_rate=0.03,
+        n_estimators=800, max_depth=6, learning_rate=0.03,
         subsample=0.8, colsample_bytree=0.8,
         # Phase 28.4 — colsample_bylevel forces feature subsampling at
         # each tree LEVEL in addition to per-tree. Many of the universal
@@ -290,7 +296,7 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         # will keep splitting on the same family at every depth, wasting
         # capacity. 0.7 forces diversification at each level.
         colsample_bylevel=0.7,
-        min_child_weight=5, reg_alpha=0.5, reg_lambda=1.0,
+        min_child_weight=3, reg_alpha=0.5, reg_lambda=1.0,
         objective="binary:logistic", eval_metric="logloss",
         tree_method="hist", random_state=42,
         monotone_constraints=_build_monotone_constraints(feat_cols),
