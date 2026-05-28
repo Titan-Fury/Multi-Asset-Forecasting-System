@@ -186,12 +186,39 @@ def _magnitude_weights(df: pd.DataFrame, *, target: str) -> np.ndarray | None:
     if ret_col not in df.columns:
         return None
     r = pd.to_numeric(df[ret_col], errors="coerce").fillna(0.0).abs().to_numpy()
-    # Clip extreme outliers (data errors) so they don't dominate the loss.
-    # 25% in 5 trading days is already an extraordinary move; cap at 50%.
-    r = np.clip(r, 0.0, 0.50)
-    # Add a small floor so sub-percent moves still contribute to learning
-    # the bulk of the distribution.
-    w = 0.25 + 4.0 * r
+    # Phase 28.4 — quantile-binned magnitude weights replacing the legacy
+    # linear `0.25 + 4*r` after a 50% clip.
+    #
+    # The old formula compressed all sub-percent moves into nearly-equal
+    # weights (a +0.1% bar got 0.254, a +0.8% bar got 0.282 — a 1.1×
+    # spread for an 8× difference in magnitude). Trees couldn't tell
+    # noise bars apart from quietly-real-signal bars. Above the cap at
+    # 50% the formula was linear in the raw return, so a 6% bar got 0.49
+    # and a 12% bar got 0.73 — a 1.5× spread for a 2× move. Both ends
+    # were over-flat.
+    #
+    # The new scheme bins by quantile of |fwd_ret| within the training
+    # set so the tree sees a clear ladder of importance:
+    #     <= p25  (the noisiest 25% of bars)              -> 0.5
+    #     p25-p50                                          -> 1.0
+    #     p50-p75                                          -> 1.5
+    #     p75-p95                                          -> 2.5
+    #     >  p95  (the most informative 5% of bars)        -> 4.0
+    # The geometric mean of these is ~1.4, comparable to the legacy
+    # mean of ~1.0, so the overall scale of the weighted loss doesn't
+    # shift drastically; what changes is the SHAPE — high-magnitude
+    # bars now genuinely dominate the gradient.
+    try:
+        q25, q50, q75, q95 = np.quantile(r[r > 0], [0.25, 0.5, 0.75, 0.95]) \
+            if (r > 0).any() else (0.001, 0.005, 0.012, 0.05)
+    except Exception:  # noqa: BLE001
+        q25, q50, q75, q95 = 0.001, 0.005, 0.012, 0.05
+    w = np.full_like(r, 1.0, dtype=float)
+    w = np.where(r <= q25, 0.5, w)
+    w = np.where((r > q25) & (r <= q50), 1.0, w)
+    w = np.where((r > q50) & (r <= q75), 1.5, w)
+    w = np.where((r > q75) & (r <= q95), 2.5, w)
+    w = np.where(r > q95, 4.0, w)
     return w
 
 
