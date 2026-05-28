@@ -318,7 +318,21 @@ def _news_combined(asset_class: str, ticker: str, display_name: str
     df = pd.concat(parts, ignore_index=True, sort=False)
     df = df.dropna(subset=["title"]).copy()
     df = df[df["title"].astype(str).str.len() > 5]
-    df = df.drop_duplicates(subset=["title"]).reset_index(drop=True)
+    # Phase 28.4 — normalized-key dedup. The legacy
+    # `drop_duplicates(subset=["title"])` only caught character-exact
+    # matches, so syndicated wire stories arriving via different sources
+    # with subtle case/punctuation/whitespace drift were kept as
+    # duplicates (inflating n_articles by 1.4-1.8x). We now build a
+    # normalized key per title and dedup on that.
+    import re as _re
+    _norm_re = _re.compile(r"[^a-z0-9]+")
+    def _norm_title(t: str) -> str:
+        s = _norm_re.sub(" ", str(t).lower().strip())
+        return _re.sub(r"\s+", " ", s)[:80]
+    df["_norm_title"] = df["title"].astype(str).map(_norm_title)
+    df = df.drop_duplicates(subset=["_norm_title"]).drop(
+        columns=["_norm_title"]
+    ).reset_index(drop=True)
     df["published_at"] = pd.to_datetime(df["published_at"], errors="coerce", utc=True)
     df = df.dropna(subset=["published_at"]).sort_values("published_at", ascending=False)
     return df, sources, len(df)
