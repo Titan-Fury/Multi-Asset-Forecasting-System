@@ -386,8 +386,24 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         # into Kull-Filho-Flach beta calibration. Default (isotonic) keeps
         # the existing CalibratedClassifierCV path so persisted models
         # behave identically.
+        #
+        # Phase 28.4 — auto-switch isotonic -> beta when the inner-val
+        # window is small (< 2000 rows). Isotonic regression is non-
+        # parametric and its step function overfits aggressively at
+        # small N. The first walk-forward fold on the india training
+        # set has ~500 inner_val rows, where isotonic produces noisy
+        # piecewise-constant probabilities that hurt OOF AUC. Beta
+        # calibration is parametric (3 params) and robust at N >= 50.
         from omni.calibration.factory import get_method
-        if get_method() == "beta":
+        _method = get_method()
+        _auto_beta = (_method == "isotonic" and len(inner_val) < 2000)
+        if _auto_beta:
+            log.info(
+                f"fold={k}: auto-switching to beta calibration "
+                f"(inner_val={len(inner_val)} < 2000; isotonic over-fits "
+                f"at this size)"
+            )
+        if _method == "beta" or _auto_beta:
             from omni.calibration.factory import fit_calibrator
             raw_v = clf.predict_proba(Xv.values)[:, 1]
             cal = fit_calibrator(raw_v, yv.values, method="beta")
