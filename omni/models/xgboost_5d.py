@@ -347,11 +347,26 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         m = _re.search(r"_(\d+)d$", str(target))
         horizon = int(m.group(1)) if m else 5
         embargo_days = horizon + 1
+    else:
+        import re as _re
+        m = _re.search(r"_(\d+)d$", str(target))
+        horizon = int(m.group(1)) if m else 5
 
+    # Phase 28.4 — switch single-mode CV from `walkforward_splits` (global
+    # time-only purge) to `purged_kfold_indices` with per-ticker purge.
+    # On a 200k-row pooled india panel of ~50 tickers the global purge
+    # was throwing out ~30% of cross-ticker train rows that aren't
+    # actually leaks (a row at (T1, t-3) doesn't leak into a val row at
+    # (T2, t)). The per-ticker purge keeps those rows. The stack-mode
+    # trainer has used this since Phase 24.18; single-mode was lagging.
+    from omni.cv.purged_kfold import purged_kfold_indices
     res = WalkForwardResult(feature_cols=feat_cols)
-    for k, (tr_idx, te_idx) in enumerate(walkforward_splits(
-            dates, n_folds=n_folds, min_train=min_train,
-            embargo_days=embargo_days)):
+    splits = purged_kfold_indices(
+        dates, n_folds=n_folds,
+        horizon_days=horizon, embargo_days=embargo_days,
+        tickers=tickers,
+    )
+    for k, (tr_idx, te_idx) in enumerate(splits):
         # Inner split: last 20% of train window for calibration (time-ordered)
         n_inner = max(1, int(len(tr_idx) * inner_val_frac))
         inner_train = tr_idx[:-n_inner]
