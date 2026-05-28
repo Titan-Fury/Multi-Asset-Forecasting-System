@@ -71,7 +71,7 @@ def main() -> int:
                 "low": synth_close.values,
             })
             tb = triple_barrier(ohlc, horizons=horizons,
-                                pt_mult=2.0, sl_mult=1.0, vol_window=40)
+                                pt_mult=1.5, sl_mult=1.0, vol_window=40)
             tb["ticker"] = tkr
             tb_chunks.append(tb)
         except Exception as exc:  # noqa: BLE001

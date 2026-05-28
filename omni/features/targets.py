@@ -66,10 +66,19 @@ def compute(prices: pd.DataFrame, *, horizons: tuple[int, ...] = (1, 5, 20),
 def triple_barrier(prices: pd.DataFrame,
                    *,
                    horizons: tuple[int, ...] = (1, 5, 20),
-                   pt_mult: float = 2.0,
+                   pt_mult: float = 1.5,
                    sl_mult: float = 1.0,
                    vol_window: int = 40) -> pd.DataFrame:
     """Triple-barrier labels (de Prado, AFML §3.4).
+
+    Phase 28.4 — `pt_mult` default changed from 2.0 to 1.5 to rebalance
+    the positive class share. Under pt_mult=2.0 the (+1, 0, -1) class
+    distribution on the india training set was roughly 25 / 33 / 42, so
+    binarising as `(== +1)` for the classifier head produced a 25/75
+    imbalance that made a constant-zero predictor score ~0.51 OOF AUC
+    just from the class skew, masking real signal lift. Tightening to
+    1.5σ rebalances to ~38/62 — a meaningful problem for the classifier
+    while still preserving the asymmetric 1.5:1.0 reward:risk profile.
 
     Phase 28.4 — `vol_window` default changed from 20 to 40 trading days.
     20-day rolling sigma is noisy for Indian mid-caps where intraday
