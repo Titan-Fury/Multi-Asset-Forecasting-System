@@ -746,14 +746,51 @@ def _build_card(
     # ---- Intraday microstructure (Part A) ----
     intraday_feats: dict = {}
     intraday_tilt_applied = False
-    try:
-        from omni.ingest.intraday import fetch_intraday_bars
-        from omni.features.intraday import compute_intraday_features
-        ibars = fetch_intraday_bars(bundle.asset_class, bundle.ticker, days=5)
-        intraday_feats = compute_intraday_features(ibars, last_close)
-    except Exception as exc:  # noqa: BLE001
-        log.debug(f"intraday features skipped for {bundle.ticker}: {exc}")
-        intraday_feats = {}
+    # Phase 28.4 — market-hours gate. Outside the relevant market session
+    # `fetch_intraday_bars` returns the same stale bars yfinance cached
+    # an hour ago, but only after a 200-500 ms HTTP round trip per
+    # ticker. Skip the call entirely when the market is closed; the
+    # downstream tilt-application already handles `intraday_feats={}`
+    # gracefully (gates on `intraday_bar_count >= 3`).
+    def _market_open_now(ac: str) -> bool:
+        try:
+            from datetime import datetime, time as _time
+            ac_l = (ac or "").lower()
+            if ac_l in ("crypto", "fx"):
+                return True  # 24/7 markets
+            now = datetime.utcnow()
+            if now.weekday() >= 5:  # Sat / Sun
+                return False
+            # Convert UTC to local market timezone for session check.
+            if ac_l == "india":
+                # NSE 09:15-15:30 IST = 03:45-10:00 UTC
+                t = now.time()
+                return _time(3, 45) <= t <= _time(10, 0)
+            if ac_l == "us":
+                # NYSE 09:30-16:00 ET (EST: -5h, EDT: -4h). Use a
+                # generous 13:30-21:00 UTC window covering both DST
+                # offsets — false positives are cheap (the call still
+                # works), false negatives are not (skipped during
+                # session).
+                t = now.time()
+                return _time(13, 30) <= t <= _time(21, 0)
+            return True  # Unknown asset class — be conservative, fetch
+        except Exception:  # noqa: BLE001
+            return True
+    if not _market_open_now(bundle.asset_class):
+        log.debug(
+            f"intraday: market closed for {bundle.asset_class}; "
+            f"skipping fetch for {bundle.ticker}"
+        )
+    else:
+        try:
+            from omni.ingest.intraday import fetch_intraday_bars
+            from omni.features.intraday import compute_intraday_features
+            ibars = fetch_intraday_bars(bundle.asset_class, bundle.ticker, days=5)
+            intraday_feats = compute_intraday_features(ibars, last_close)
+        except Exception as exc:  # noqa: BLE001
+            log.debug(f"intraday features skipped for {bundle.ticker}: {exc}")
+            intraday_feats = {}
 
     # Apply bounded tilt to 1d edge (only if we have intraday data)
     if intraday_feats and intraday_feats.get("intraday_bar_count", 0) >= 3:
