@@ -97,19 +97,50 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
         date_iso = datetime.now(timezone.utc).date().isoformat()
         path = _lake_paths.predictions_path(date_iso)
         _lake_paths.ensure_parent(path)
-        # Cross-process safe write: spin briefly on a sidecar lockfile, then
-        # read-modify-write to a temp file and atomically rename. Avoids the
-        # silent clobber that occurred when two writers ran concurrently.
-        _atomic_append_parquet(Path(path), pd.DataFrame([row]))
+        # Phase 28.4 — append-only JSONL fast path. The legacy
+        # `_atomic_append_parquet` did a full read-modify-write of the
+        # day's parquet on every call, which scaled O(N^2) on busy days
+        # (62 tickers x 2 horizons x 2-3 runs/day = 248-372 full file
+        # rewrites of a steadily growing parquet). The new path appends
+        # one JSON line per call to a sibling `.jsonl` file — O(1) per
+        # call, no locks needed for typical single-process loads. The
+        # `_atomic_append_parquet` path stays as a fallback for callers
+        # that explicitly opt in to the parquet roll (e.g. nightly
+        # compaction). `read_predictions_window` reads both formats.
+        _append_jsonl(Path(path).with_suffix(".jsonl"), row)
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning(f"predict_log.log_prediction failed: {exc}")
         return False
 
 
+def _append_jsonl(path: Path, row: dict) -> None:
+    """Append a single row as one JSON line to `path`.
+
+    Phase 28.4 — replaces `_atomic_append_parquet` on the hot path. Each
+    call writes ONE line in O(1) (no read-modify-write). Concurrent
+    writers from a single process are serialized by the OS append flag;
+    cross-process concurrency on Windows is best-effort but the worst
+    case is interleaved-but-still-valid JSON lines (each line is
+    written atomically).
+
+    The companion `_atomic_append_parquet` is preserved below for
+    nightly compaction tooling that wants the legacy parquet shape.
+    """
+    import json
+    payload = json.dumps(row, default=str)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(payload + "\n")
+
+
 def _atomic_append_parquet(path: Path, new_rows: pd.DataFrame,
                            *, lock_timeout_s: float = 5.0) -> None:
-    """Append `new_rows` to `path` (parquet) under a file lock + atomic rename."""
+    """Append `new_rows` to `path` (parquet) under a file lock + atomic rename.
+
+    Phase 28.4 — kept for nightly compaction tooling (consume the JSONL,
+    fold into a daily parquet, delete the JSONL). The hot per-prediction
+    path now uses `_append_jsonl` instead.
+    """
     lock = path.with_suffix(path.suffix + ".lock")
     deadline = time.monotonic() + lock_timeout_s
     fd = None
@@ -157,7 +188,13 @@ def _atomic_append_parquet(path: Path, new_rows: pd.DataFrame,
 
 
 def read_predictions_window(start_iso: str, end_iso: str) -> pd.DataFrame:
-    """Read predictions logged between two ISO dates (inclusive)."""
+    """Read predictions logged between two ISO dates (inclusive).
+
+    Phase 28.4 — reads both the legacy `.parquet` daily files (written
+    by older `log_prediction` calls and the nightly compactor) AND the
+    new `.jsonl` daily files (written by the fast-path
+    `_append_jsonl`). Both formats produce the same schema.
+    """
     d = _lake_paths.predictions_dir()
     if not d.exists():
         return pd.DataFrame(columns=_SCHEMA_COLS)
@@ -166,6 +203,12 @@ def read_predictions_window(start_iso: str, end_iso: str) -> pd.DataFrame:
         if start_iso <= f.stem <= end_iso:
             try:
                 parts.append(pd.read_parquet(f))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"predict_log: skipping unreadable {f}: {exc}")
+    for f in sorted(d.glob("*.jsonl")):
+        if start_iso <= f.stem <= end_iso:
+            try:
+                parts.append(pd.read_json(f, lines=True))
             except Exception as exc:  # noqa: BLE001
                 log.warning(f"predict_log: skipping unreadable {f}: {exc}")
     if not parts:
