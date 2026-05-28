@@ -14,7 +14,8 @@ import pandas as pd
 
 
 _RANK_COLS = (
-    "ret_20d",                                # momentum (60d not produced today)
+    "ret_20d",                                # momentum
+    "ret_60d",                                # momentum (60d, Phase 28.4)
     "rsi_14", "macd_hist_pct", "vol_ratio",   # technical (Phase 24.17: macd_hist_pct)
     "trailing_pe", "profit_margin",           # fundamental
     "return_on_equity", "revenue_growth",
@@ -24,6 +25,20 @@ _RANK_COLS = (
     # within its asset class" which is a much cleaner regime signal than
     # the raw ratio.
     "news_volume_z_60d", "panic_keyword_ratio",
+    # Phase 28.4 — eight obvious cross-sectional candidates that were
+    # previously absolute-value-only despite being naturally rank-friendly:
+    #   vol_20             — 20-day annualised vol (which stock is hot today)
+    #   adx_14             — trend strength (which stock is trending hardest)
+    #   atr_pct_14         — daily-range / close (intraday wildness)
+    #   dist_from_52w_high — how far from yearly peak (recovery vs distressed)
+    #   dist_from_52w_low  — how far from yearly trough (oversold)
+    #   obv_z_60d          — accumulation/distribution flow z-score
+    #   piotroski_f_score  — fundamental quality composite (0-9)
+    #   qmj_score          — Quality-Minus-Junk composite
+    "vol_20", "adx_14", "atr_pct_14",
+    "dist_from_52w_high", "dist_from_52w_low",
+    "obv_z_60d",
+    "piotroski_f_score", "qmj_score",
 )
 
 
