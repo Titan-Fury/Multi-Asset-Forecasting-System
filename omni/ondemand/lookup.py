@@ -186,93 +186,108 @@ def _fundamentals_combined(asset_class: str, ticker: str) -> tuple[pd.DataFrame,
 @cached(ttl=TTL.news, key="news_live_v3:{asset_class}:{ticker}:{display_name}")
 def _news_combined(asset_class: str, ticker: str, display_name: str
                    ) -> tuple[pd.DataFrame, list[str], int]:
+    # Phase 28.4 — parallel news-source fan-out. Previously the 10+
+    # source calls (NewsAPI, Currents, Marketaux, GDELT, StockTwits,
+    # EDGAR, Reddit, Indian RSS, BSE notices, Telegram, SEBI-PIT) ran
+    # serially over 5-15 seconds total. Each call is a network round
+    # trip that doesn't depend on the others, so we now fan them out
+    # via ThreadPoolExecutor. Expected wall-clock saving: 3-5x on
+    # cold-cache predictions where every source has to be hit.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     sources: list[str] = []
     parts: list[pd.DataFrame] = []
 
-    nws = _newsapi.news(ticker, display_name)
-    if not nws.empty:
-        sources.append("newsapi"); parts.append(nws.assign(sent_score=np.nan))
-    # Currents — 90-day historical lookback fills the gap NewsAPI's 24h free
-    # window leaves on quiet-news days, especially for small-cap tickers.
-    try:
-        cur = _currents.news(ticker, display_name=display_name)
-        if cur is not None and not cur.empty:
-            sources.append("currents")
-            parts.append(cur.assign(sent_score=np.nan))
-    except Exception as exc:  # noqa: BLE001
-        log.warning(f"currents fetch failed {ticker}: {exc}")
-    mar = _marketaux.news(ticker, asset_class=asset_class)
-    if not mar.empty:
-        sources.append("marketaux"); parts.append(mar)
-    gd = _gdelt.news(ticker, display_name=display_name)
-    if not gd.empty:
-        sources.append("gdelt"); parts.append(gd.assign(sent_score=np.nan))
-    st = _stocktwits.messages(ticker, asset_class=asset_class)
-    if not st.empty:
-        sources.append("stocktwits"); parts.append(st)
+    def _try(name: str, fn):
+        """Wrap a source fetch so an exception in one source doesn't
+        derail the others. Returns (name, df_or_None)."""
+        try:
+            df = fn()
+            return (name, df)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(f"{name} fetch failed {ticker}: {exc}")
+            return (name, None)
 
-    # SEC EDGAR — Form 4 (insider trades) + 8-K (material events). US only.
+    # Build the per-source task list. Each entry is (name, zero-arg
+    # callable that returns either a DataFrame or None). India-specific
+    # sources are gated on asset_class so we don't waste threads.
+    tasks: list[tuple[str, callable]] = [
+        ("newsapi",   lambda: _newsapi.news(ticker, display_name)),
+        ("currents",  lambda: _currents.news(ticker, display_name=display_name)),
+        ("marketaux", lambda: _marketaux.news(ticker, asset_class=asset_class)),
+        ("gdelt",     lambda: _gdelt.news(ticker, display_name=display_name)),
+        ("stocktwits",lambda: _stocktwits.messages(ticker, asset_class=asset_class)),
+        ("reddit",    lambda: _reddit.posts(ticker, display_name=display_name,
+                                              asset_class=asset_class)),
+    ]
     if asset_class == "us":
-        try:
-            ed = _edgar.recent_filings(ticker, days=180)
-            if not ed.empty:
-                # Keep only the columns shared with the news union schema
-                cols_keep = ["title", "url", "source", "published_at", "sent_score"]
-                # description / form fields could be useful later; keep title-only for now
-                ed_slim = ed[[c for c in cols_keep if c in ed.columns]].copy()
-                sources.append("edgar"); parts.append(ed_slim)
-        except Exception as e:
-            log.warning(f"edgar fetch failed {ticker}: {e}")
-
-    # Reddit (public no-auth JSON) — retail crowd sentiment.
-    try:
-        rd = _reddit.posts(ticker, display_name=display_name, asset_class=asset_class)
-        if rd is not None and not rd.empty:
-            cols_keep = ["title", "url", "source", "published_at", "sent_score"]
-            rd_slim = rd[[c for c in cols_keep if c in rd.columns]].copy()
-            sources.append("reddit"); parts.append(rd_slim)
-    except Exception as e:
-        log.warning(f"reddit fetch failed {ticker}: {e}")
-
-    # Indian-press RSS (MoneyControl, ET, LiveMint, Hindu BusinessLine).
-    # India-only — much higher quality than international sources for NSE/BSE names.
+        tasks.append(("edgar", lambda: _edgar.recent_filings(ticker, days=180)))
     if asset_class == "india":
-        try:
-            from omni.ingest.sources import indian_rss as _ind_rss
-            ir = _ind_rss.fetch_indian_news(ticker, display_name=display_name)
-            if ir is not None and not ir.empty:
-                cols_keep = ["title", "url", "source", "published_at", "sent_score"]
-                ir_slim = ir[[c for c in cols_keep if c in ir.columns]].copy()
-                sources.append("indian_rss"); parts.append(ir_slim)
-        except Exception as e:
-            log.warning(f"indian_rss fetch failed {ticker}: {e}")
+        from omni.ingest.sources import (
+            indian_rss as _ind_rss,
+            bse_notices as _bse,
+            telegram_channels as _tg,
+            sebi_insider as _pit,
+        )
+        tasks.append(("indian_rss",
+                       lambda: _ind_rss.fetch_indian_news(
+                           ticker, display_name=display_name)))
+        tasks.append(("bse_notices",
+                       lambda: _bse.matching_notices(
+                           ticker, display_name=display_name)))
+        tasks.append(("telegram",
+                       lambda: _tg.fetch_telegram_news(
+                           ticker, display_name=display_name)))
+        # SEBI PIT — needs ticker filter post-fetch; do that in the
+        # post-processing block below.
+        tasks.append(("sebi_pit_raw",
+                       lambda: _pit.insider_disclosures(days=30)))
 
-        # BSE Corporate Announcements (results, insider disclosures, board meetings)
-        try:
-            from omni.ingest.sources import bse_notices as _bse
-            bn = _bse.matching_notices(ticker, display_name=display_name)
-            if bn is not None and not bn.empty:
-                cols_keep = ["title", "url", "source", "published_at", "sent_score"]
-                bn_slim = bn[[c for c in cols_keep if c in bn.columns]].copy()
-                sources.append("bse_notices"); parts.append(bn_slim)
-        except Exception as e:
-            log.warning(f"bse_notices fetch failed {ticker}: {e}")
+    # Execute all source calls in parallel with a small thread pool.
+    # 8 workers comfortably handles the ~10 sources without thrashing
+    # the network or breaching free-tier rate limits (each individual
+    # source is quota-policed by its own client).
+    results: dict[str, pd.DataFrame | None] = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(_try, name, fn): name for name, fn in tasks}
+        for fut in as_completed(futs):
+            name, df = fut.result()
+            results[name] = df
 
-        # Telegram public channels (Indian retail finance community)
-        try:
-            from omni.ingest.sources import telegram_channels as _tg
-            tg = _tg.fetch_telegram_news(ticker, display_name=display_name)
-            if tg is not None and not tg.empty:
-                cols_keep = ["title", "url", "source", "published_at", "sent_score"]
-                tg_slim = tg[[c for c in cols_keep if c in tg.columns]].copy()
-                sources.append("telegram"); parts.append(tg_slim)
-        except Exception as e:
-            log.warning(f"telegram fetch failed {ticker}: {e}")
+    # Reassemble in the legacy stable order so downstream blending /
+    # source-attribution stays deterministic across runs.
+    def _push(name: str, df: pd.DataFrame | None,
+              *, assign_nan: bool = False,
+              cols_keep: list[str] | None = None) -> None:
+        if df is None or df.empty:
+            return
+        out = df.assign(sent_score=np.nan) if assign_nan else df.copy()
+        if cols_keep:
+            out = out[[c for c in cols_keep if c in out.columns]].copy()
+        sources.append(name)
+        parts.append(out)
 
-        # SEBI PIT-2015 insider disclosures (promoters, KMPs)
+    _push("newsapi", results.get("newsapi"), assign_nan=True)
+    _push("currents", results.get("currents"), assign_nan=True)
+    _push("marketaux", results.get("marketaux"))
+    _push("gdelt", results.get("gdelt"), assign_nan=True)
+    _push("stocktwits", results.get("stocktwits"))
+
+    if asset_class == "us":
+        cols_keep = ["title", "url", "source", "published_at", "sent_score"]
+        _push("edgar", results.get("edgar"), cols_keep=cols_keep)
+
+    cols_keep = ["title", "url", "source", "published_at", "sent_score"]
+    _push("reddit", results.get("reddit"), cols_keep=cols_keep)
+
+    if asset_class == "india":
+        _push("indian_rss", results.get("indian_rss"), cols_keep=cols_keep)
+        _push("bse_notices", results.get("bse_notices"), cols_keep=cols_keep)
+        _push("telegram", results.get("telegram"), cols_keep=cols_keep)
+
+        # SEBI PIT post-processing (filter to ticker, re-format rows).
+        pit_df = results.get("sebi_pit_raw")
         try:
-            from omni.ingest.sources import sebi_insider as _pit
-            pit_df = _pit.insider_disclosures(days=30)
             if pit_df is not None and not pit_df.empty and "ticker" in pit_df.columns:
                 sub = pit_df[pit_df["ticker"].astype(str).str.upper() == ticker.upper()]
                 if not sub.empty:
@@ -294,8 +309,8 @@ def _news_combined(asset_class: str, ticker: str, display_name: str
                         })
                     if rows_pit:
                         sources.append("sebi_pit"); parts.append(pd.DataFrame(rows_pit))
-        except Exception as e:
-            log.warning(f"sebi_pit fetch failed {ticker}: {e}")
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"sebi_pit post-processing failed {ticker}: {e}")
 
     if not parts:
         return pd.DataFrame(), [], 0
