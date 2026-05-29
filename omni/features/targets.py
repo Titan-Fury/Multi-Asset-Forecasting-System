@@ -114,7 +114,16 @@ def triple_barrier(prices: pd.DataFrame,
     px = df["adj_close"].astype(float).to_numpy()
     high = df.get("high", df["adj_close"]).astype(float).to_numpy()
     low = df.get("low", df["adj_close"]).astype(float).to_numpy()
-    log_ret = np.log(px[1:] / px[:-1])
+    # Phase 28.4 — guard against zero / negative prices in the log-return
+    # calc that follows. A single 0 or negative entry (IPO-day placeholder,
+    # corrupt corporate-action adj, data-provider error) produces
+    # `-inf`/`NaN` log returns, which then corrupt the rolling sigma for
+    # ~20 rows downstream — and through `pt = px * exp(±k*sigma)` produce
+    # `+inf` / 0 barriers that collapse every label in the poison window
+    # to 0 (time-expired). Replacing with NaN lets pandas' min_periods=5
+    # skip the bad bars cleanly.
+    px_for_log = np.where(px <= 0, np.nan, px)
+    log_ret = np.log(px_for_log[1:] / px_for_log[:-1])
     sigma = pd.Series(log_ret).rolling(vol_window, min_periods=5).std().to_numpy()
     sigma = np.concatenate([[np.nan], sigma])  # align to px length
     n = len(px)
