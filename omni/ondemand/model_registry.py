@@ -110,6 +110,11 @@ def save_horizon(um: UniversalModel, horizon: int) -> Path:
 
 
 _CACHE: dict[int, UniversalModel] = {}
+# Phase 28.4 — guard `_CACHE` mutations against concurrent loads /
+# invalidations under FastAPI's threadpool + Streamlit reruns. Reads
+# of an existing entry stay lockless because dict .get() is atomic.
+import threading as _mr_threading
+_CACHE_LOCK = _mr_threading.Lock()
 
 
 def load() -> UniversalModel:
@@ -134,8 +139,10 @@ def load_horizon(horizon: int) -> UniversalModel | None:
     Reads metadata from the joblib bundle when present (new format), and
     falls back to the `<name>.meta.json` sidecar for older artifacts.
     """
-    if horizon in _CACHE:
-        return _CACHE[horizon]
+    # Fast path: atomic dict lookup, no lock needed.
+    cached = _CACHE.get(horizon)
+    if cached is not None:
+        return cached
     blob, meta = _paths_for(horizon)
     if not blob.exists():
         return None
@@ -155,7 +162,15 @@ def load_horizon(horizon: int) -> UniversalModel | None:
         horizon_days=int(md.get("horizon_days", horizon)),
         n_train_rows=md.get("n_train_rows"),
     )
-    _CACHE[horizon] = um
+    # Phase 28.4 — atomic publish under the lock. Re-check inside the
+    # lock in case another thread populated the entry while we were
+    # joblib-loading; the second result wins and the duplicate UM
+    # we built gets garbage-collected.
+    with _CACHE_LOCK:
+        existing = _CACHE.get(horizon)
+        if existing is not None:
+            return existing
+        _CACHE[horizon] = um
     log.info(f"universal model loaded (h={horizon}d): "
               f"{len(um.feature_cols)} features, trained {um.trained_at}, "
               f"oof_auc={um.oof_auc}, n_train_rows={um.n_train_rows}")
@@ -168,8 +183,11 @@ def available_horizons() -> list[int]:
 
 
 def invalidate() -> None:
+    # Phase 28.4 — atomic replace under the lock so concurrent readers
+    # don't observe a half-emptied dict.
     global _CACHE
-    _CACHE = {}
+    with _CACHE_LOCK:
+        _CACHE = {}
 
 
 def is_available() -> bool:

@@ -50,6 +50,12 @@ class SearchResult:
 # ---- in-process TTL cache (30s) so typing doesn't spam APIs ----
 _CACHE: dict[str, tuple[float, list[SearchResult]]] = {}
 _CACHE_TTL = 30.0
+# Phase 28.4 — guard `_CACHE` mutations against concurrent search
+# calls. The eviction-by-clear pattern in `_cache_set` is racy: a
+# reader between `.clear()` and the new write sees an empty cache
+# and triggers a duplicate fan-out to Yahoo / NSE / Coingecko.
+import threading as _search_threading
+_CACHE_LOCK = _search_threading.Lock()
 
 
 def _cache_get(k: str) -> list[SearchResult] | None:
@@ -60,9 +66,12 @@ def _cache_get(k: str) -> list[SearchResult] | None:
 
 
 def _cache_set(k: str, v: list[SearchResult]) -> None:
-    if len(_CACHE) > 256:
-        _CACHE.clear()
-    _CACHE[k] = (time.monotonic(), v)
+    # Phase 28.4 — atomic clear + write under the lock so concurrent
+    # readers don't observe a transiently empty cache.
+    with _CACHE_LOCK:
+        if len(_CACHE) > 256:
+            _CACHE.clear()
+        _CACHE[k] = (time.monotonic(), v)
 
 
 # ---- Yahoo Finance Search ----
