@@ -47,6 +47,14 @@ import time as _time
 _NEG_TTL_SECONDS = 24 * 60 * 60
 _NEG_MAX_SIZE = 10_000  # cap to prevent unbounded growth from typo storms
 _negative_cache: dict[tuple[str, str], float] = {}
+# Phase 28.4 — guard mutations of `_negative_cache` against concurrent
+# Streamlit reruns / FastAPI threadpool requests. The eviction logic in
+# `_neg_cache_put` iterates + pops + sorts the dict, which CPython will
+# raise `RuntimeError: dictionary changed size during iteration` on if
+# another thread mutates concurrently. Read-only `.get()` on the
+# fast-path stays lockless because dict gets are atomic.
+import threading as _neg_threading
+_NEG_LOCK = _neg_threading.Lock()
 
 
 def _neg_cache_hit(asset_class: str, ticker: str) -> bool:
@@ -55,7 +63,11 @@ def _neg_cache_hit(asset_class: str, ticker: str) -> bool:
     if expiry is None:
         return False
     if _time.monotonic() > expiry:
-        _negative_cache.pop(key, None)
+        # Expired-pop is the only mutation on the read path; guard it
+        # so concurrent reads don't race on a partial removal. The cost
+        # is negligible because expired hits are rare (TTL is 24h).
+        with _NEG_LOCK:
+            _negative_cache.pop(key, None)
         return False
     return True
 
@@ -64,17 +76,24 @@ def _neg_cache_put(asset_class: str, ticker: str) -> None:
     # Periodic eviction of expired entries before insert so a burst of
     # invalid tickers from a fuzzy-search bot can't grow this dict
     # without bound for the lifetime of the Streamlit process.
-    if len(_negative_cache) >= _NEG_MAX_SIZE:
-        now = _time.monotonic()
-        expired = [k for k, exp in _negative_cache.items() if exp <= now]
-        for k in expired:
-            _negative_cache.pop(k, None)
-        # If nothing was expired, drop the oldest 25% by expiry.
+    #
+    # Phase 28.4 — held under `_NEG_LOCK` because the iterate + sort +
+    # pop pattern below would race with concurrent `_neg_cache_hit`
+    # popping expired keys (CPython raises RuntimeError on dict-size
+    # change during iteration). The lock holds for ~milliseconds even
+    # in the eviction path; the typical hot path is sub-microsecond.
+    with _NEG_LOCK:
         if len(_negative_cache) >= _NEG_MAX_SIZE:
-            for k, _ in sorted(_negative_cache.items(), key=lambda kv: kv[1])[: _NEG_MAX_SIZE // 4]:
+            now = _time.monotonic()
+            expired = [k for k, exp in _negative_cache.items() if exp <= now]
+            for k in expired:
                 _negative_cache.pop(k, None)
-    key = (asset_class, ticker.upper())
-    _negative_cache[key] = _time.monotonic() + _NEG_TTL_SECONDS
+            # If nothing was expired, drop the oldest 25% by expiry.
+            if len(_negative_cache) >= _NEG_MAX_SIZE:
+                for k, _ in sorted(_negative_cache.items(), key=lambda kv: kv[1])[: _NEG_MAX_SIZE // 4]:
+                    _negative_cache.pop(k, None)
+        key = (asset_class, ticker.upper())
+        _negative_cache[key] = _time.monotonic() + _NEG_TTL_SECONDS
 
 
 @dataclass
