@@ -195,14 +195,28 @@ def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
 # ============================================================================
 
 _MODEL_CACHE: dict[str, tuple[Any, ...]] = {}
+# Phase 28.4 — guard mutations of `_MODEL_CACHE` so two threads racing
+# through `_cached_models()` don't corrupt the dict (one calling
+# `.clear()` while the other reads, or two writers fighting over
+# `[mv_tag] = ...`). Reads of an existing entry stay lockless on the
+# happy path because dict lookups are atomic in CPython.
+import threading as _threading
+_MODEL_CACHE_LOCK = _threading.Lock()
 
 
 def _cached_models(mv_tag: str):
     """Return (universal, stack_record, conformal, circuit_risk) loaded once
     per mv_tag. circuit_risk is the optional Phase 24.18 sparse-positive
-    classifier; None when the artifact is absent (training script not run)."""
-    if mv_tag in _MODEL_CACHE:
-        return _MODEL_CACHE[mv_tag]
+    classifier; None when the artifact is absent (training script not run).
+
+    Phase 28.4 — thread-safe under FastAPI's asyncio.to_thread + Streamlit
+    reruns: the load-and-publish step is held under `_MODEL_CACHE_LOCK`
+    so two parallel cold misses can't double-load + double-mutate.
+    """
+    # Fast path: cache hit — atomic dict get, no lock needed.
+    cached = _MODEL_CACHE.get(mv_tag)
+    if cached is not None:
+        return cached
     universal = None
     stack_rec = None
     conformal = None
@@ -304,10 +318,21 @@ def _cached_models(mv_tag: str):
     # Back-compat: callers previously expected a single `meta_head`. Expose
     # the h=5 head under that name when present.
     meta_head = meta_heads.get(5)
-    _MODEL_CACHE.clear()
-    _MODEL_CACHE[mv_tag] = (universal, stack_rec, conformal, circuit_model,
-                              meta_head, meta_heads, regime_stacks)
-    return _MODEL_CACHE[mv_tag]
+    # Phase 28.4 — atomic publish under the lock. Re-check inside the
+    # lock in case another thread populated the entry while we were
+    # loading (avoids double-load wasted I/O; the second result wins
+    # but both load paths are deterministic for the same mv_tag).
+    new_entry = (universal, stack_rec, conformal, circuit_model,
+                 meta_head, meta_heads, regime_stacks)
+    with _MODEL_CACHE_LOCK:
+        # Replace the whole dict in one atomic assignment. This way a
+        # reader on the fast path always sees either the OLD complete
+        # entry or the NEW complete entry — never a partially-cleared
+        # mid-state. (The previous `.clear()` + `[mv_tag] = ...` had a
+        # window where another reader observed an empty dict.)
+        _MODEL_CACHE.clear()
+        _MODEL_CACHE[mv_tag] = new_entry
+        return new_entry
 
 
 def _score_one(feat_only: pd.DataFrame,
