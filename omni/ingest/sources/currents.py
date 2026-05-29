@@ -35,15 +35,16 @@ def _key() -> str | None:
 
 
 def news(ticker: str, display_name: str | None = None,
-         *, lookback_days: int = 14, page_size: int = 50,
+         *, lookback_days: int = 15, page_size: int = 50,
          language: str = "en") -> pd.DataFrame:
     """Fetch articles mentioning the ticker / display name.
 
-    `lookback_days` defaults to 14 (kept under the free-tier 15-day cap
-    by one day to avoid edge-case 400s). The query string prefers
-    `display_name` because Currents is full-text-indexed and a name
-    match is more selective than a ticker symbol that may collide with
-    random words.
+    `lookback_days` defaults to 15 — the maximum the free tier accepts
+    per request. Phase 28.4 raised this from the prior conservative
+    14 (one-day-buffer) now that we know the per-request server
+    enforcement and we have headroom on the 1000/day quota: even at
+    one full-window call per ticker per hour, 24 calls × 60 tickers
+    is still well below the daily cap.
     """
     key = _key()
     if not key:
