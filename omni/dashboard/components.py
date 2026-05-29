@@ -1043,8 +1043,17 @@ def prediction_card(card_dict: dict) -> None:
         with st.expander(f"News · {len(news)} headlines", expanded=False):
             if not news:
                 st.caption("No news pulled this round.")
-            # Prepare a "X hours ago" formatter once
-            now = pd.Timestamp.utcnow().tz_localize(None)
+            # Prepare a "X hours ago" formatter once.
+            #
+            # Phase 28.4 fix-up — `pd.Timestamp.utcnow()` is deprecated in
+            # pandas 2.x. We also need to subtract from a tz-aware
+            # `t = pd.to_datetime(iso_str, utc=True)` below, where calling
+            # `.tz_localize(None)` raises `TypeError: Cannot localize
+            # tz-aware Timestamp, use tz_convert` in pandas 2.x — so the
+            # bare `except` was eating the error and every news item
+            # showed empty relative-time. Use `tz_convert(None)` to strip
+            # the tz off an aware timestamp (the supported pattern).
+            now = pd.Timestamp.now("UTC").tz_localize(None)
 
             def _rel_time(iso_str: str) -> str:
                 if not iso_str:
@@ -1053,7 +1062,7 @@ def prediction_card(card_dict: dict) -> None:
                     t = pd.to_datetime(iso_str, errors="coerce", utc=True)
                     if pd.isna(t):
                         return ""
-                    delta = now - t.tz_localize(None)
+                    delta = now - t.tz_convert(None)
                     secs = int(delta.total_seconds())
                     if secs < 60:
                         return "just now"
