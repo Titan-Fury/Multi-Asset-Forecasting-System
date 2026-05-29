@@ -27,6 +27,27 @@ from omni.llm.rag.store import RAGStore
 
 _log = logging.getLogger("omni.llm.rag.retriever")
 
+
+# Phase 28.4 — `rank_bm25` is an optional sparse-retrieval dependency.
+# Without it the hybrid retriever silently degrades to dense-only,
+# which materially worsens explanation quality (sparse leg recovers
+# rare-keyword chunks the dense embedder misses, e.g. ticker symbols
+# and CIK numbers). Probe for it at module import and emit ONE loud
+# warning if it's missing — the per-call warning at line 126 only
+# fires when retrieval actually runs, which is too late to surface in
+# startup logs.
+try:
+    from rank_bm25 import BM25Okapi as _BM25Okapi_probe  # type: ignore  # noqa: F401
+    _BM25_AVAILABLE = True
+except ImportError:
+    _BM25_AVAILABLE = False
+    _log.warning(
+        "rank_bm25 not installed — RAG retriever will run dense-only "
+        "(no sparse/keyword leg). Explanations will degrade quality "
+        "for rare-keyword queries (ticker symbols, CIK numbers, etc). "
+        "Install with: pip install rank_bm25"
+    )
+
 # Reranker model id and lazy singleton
 _RERANK_MODEL = "BAAI/bge-reranker-base"
 _RERANK_MAX_LENGTH = 512
@@ -120,10 +141,15 @@ def _bm25_rank(query: str, candidates: list[dict], top_k: int) -> list[tuple[int
     `(index, score)` pairs sorted by score desc."""
     if not candidates:
         return []
+    # Phase 28.4 — short-circuit on the module-level probe so we don't
+    # re-import + re-fail per call. The startup warning above already
+    # surfaced the missing dependency loudly; here we just return an
+    # empty rank list and let the dense leg carry the retrieval.
+    if not _BM25_AVAILABLE:
+        return []
     try:
         from rank_bm25 import BM25Okapi  # type: ignore
     except ImportError:
-        _log.warning("rank_bm25 not installed; skipping sparse retrieval")
         return []
     corpus = [_tokenize(c.get("text", "")) for c in candidates]
     if not any(corpus):
