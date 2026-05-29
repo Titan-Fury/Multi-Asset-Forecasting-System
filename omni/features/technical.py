@@ -64,7 +64,13 @@ def compute(prices: pd.DataFrame) -> pd.DataFrame:
     # was always NaN at training and inference, costing the universal
     # model a free 60-day momentum signal.
     out["ret_60d"] = ac.pct_change(60)
-    out["log_ret_1d"] = np.log(ac / ac.shift(1))
+    # Phase 28.4 — guard np.log(0). When `ac.shift(1)` is 0 (IPO-day
+    # placeholder, corrupt corporate-action adj, etc.) `np.log(ac/0)`
+    # is `+inf` and `np.log(0/0)` is NaN — both poison the downstream
+    # rolling vol estimators (vol_5, vol_20, parkinson_vol_20, gk_vol_20)
+    # for ~20 bars after the bad row. Replacing 0 with NaN lets pandas'
+    # `min_periods` skip the row cleanly.
+    out["log_ret_1d"] = np.log(ac / ac.shift(1).replace(0, np.nan))
 
     # SMAs as DISTANCE from close (unitless). EMAs dropped — MACD captures
     # the spread already, and keeping raw EMA values pollutes cross-ticker
@@ -142,7 +148,11 @@ def compute(prices: pd.DataFrame) -> pd.DataFrame:
     o = df["open"].astype(float).replace(0, np.nan)
     ln_hl = np.log(h_safe / l_safe).fillna(0.0)
     ln_co = np.log(c / o).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    ln_cc = np.log(ac / ac.shift(1))
+    # Phase 28.4 — guard np.log(0) on the close-to-close fallback used
+    # by the locked-bar Parkinson / Garman-Klass estimators. Same
+    # IPO-zero / data-error footgun as `log_ret_1d` above; the old
+    # `ac.shift(1)` denominator could produce `+inf` when shift(1) was 0.
+    ln_cc = np.log(ac / ac.shift(1).replace(0, np.nan))
 
     pk = (ln_hl ** 2) / (4 * np.log(2))
     gk = 0.5 * (ln_hl ** 2) - (2 * np.log(2) - 1) * (ln_co ** 2)
