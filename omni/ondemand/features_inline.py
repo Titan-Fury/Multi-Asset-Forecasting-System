@@ -76,7 +76,17 @@ def _load_recent_pool_slice(asset_class: str, *,
             try:
                 from omni.utils.logger import log
                 max_dt = pd.Timestamp(df["date"].max())
-                today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+                # Phase 28.4 fix-up — `pd.Timestamp.utcnow()` is deprecated in
+                # pandas 2.x (will return tz-aware in a future major). Use the
+                # supported `.now("UTC")` form, then strip the tz so the
+                # arithmetic against the (naive) `max_dt` from the parquet
+                # works without raising. Wrapping the previous deprecated
+                # call inside a broad except meant the freshness gate was
+                # silently disabled if pandas raised — that's exactly the
+                # silent failure mode this gate was meant to prevent.
+                today = (pd.Timestamp.now("UTC")
+                            .tz_localize(None)
+                            .normalize())
                 age_days = max(0, int((today - max_dt.normalize()).days))
                 if age_days > _MAX_SLICE_AGE_DAYS:
                     log.warning(
@@ -87,10 +97,12 @@ def _load_recent_pool_slice(asset_class: str, *,
                         f"0.5 placeholders"
                     )
                     return None
-            except Exception:  # noqa: BLE001
-                # Date arithmetic glitch (e.g. all-NaT) — be conservative
-                # and fall through with the slice; the existing code path
-                # handles edge cases below.
+            except (ValueError, TypeError, AttributeError):
+                # Narrow exception list — these are the only things date
+                # arithmetic can legitimately raise (all-NaT max, pandas
+                # API drift, missing tzinfo). A broad `except Exception`
+                # would silently mask the very class of bug the gate is
+                # meant to detect.
                 pass
             cutoff = df["date"].max() - pd.Timedelta(days=lookback_days)
             return df[df["date"] >= cutoff].reset_index(drop=True)
