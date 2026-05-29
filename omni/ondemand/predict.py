@@ -704,7 +704,11 @@ def _build_card(
     try:
         _cal = conformal
         if _cal is None:
-            from omni.models.conformal import ConformalIntervalCalibrator  # noqa: F401
+            # Phase 28.4 fix-up — drop the now-unused
+            # `from omni.models.conformal import ConformalIntervalCalibrator`
+            # type hint that was carried as `# noqa: F401`. The new path
+            # uses `hasattr(_cal, "widen")` for duck typing and never
+            # references the class symbol, so the import was dead.
             from pathlib import Path as _P
             import joblib as _jl
             _cal_path = _P("data") / "models" / "conformal_h5.joblib"
