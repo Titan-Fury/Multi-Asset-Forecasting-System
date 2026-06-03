@@ -122,6 +122,58 @@ def _load_recent_pool_slice(asset_class: str, *,
         return None
 
 
+# ----------------------------------------------------------------------
+# Phase 28.5 (Tier A2) — live quarterly fundamentals at inference.
+# The training pipeline (build_training_set.py) merges ~24 `q_*` columns
+# (q_total_assets, q_net_income, q_free_cash_flow, ...) plus `asof_date`
+# via quarterly.read_all_quarterly() -> pivot_for_join() -> merge_asof.
+# The inference path never produced these, so they were silently
+# median-filled (the CIANAGRO/OMNITECH probe flagged 24 q_* columns
+# missing). This helper fetches the same quarterly data live (yfinance),
+# pivots it to the identical wide schema, and is cached so the per-call
+# network cost is amortised. Quarterly statements change ~4x/year, so a
+# 24h TTL is generous.
+# ----------------------------------------------------------------------
+def _load_quarterly_wide(asset_class: str, ticker: str) -> "pd.DataFrame | None":
+    """Return wide-format quarterly fundamentals (q_* cols + asof_date)
+    for one ticker, or None when unavailable. Cached to amortise the
+    yfinance round-trip across rapid-fire prediction calls."""
+    if asset_class in ("crypto", "fx"):
+        return None
+
+    try:
+        from omni.ondemand.cache import cached
+    except Exception:  # noqa: BLE001
+        cached = None
+
+    def _fetch(asset_class: str, ticker: str) -> "pd.DataFrame | None":
+        try:
+            from omni.lake.quarterly import (
+                fetch_quarterly_fundamentals, pivot_for_join,
+            )
+            long_df = fetch_quarterly_fundamentals(asset_class, ticker)
+            if long_df is None or long_df.empty:
+                return None
+            wide = pivot_for_join(long_df)
+            if wide is None or wide.empty:
+                return None
+            return wide
+        except Exception:  # noqa: BLE001
+            return None
+
+    if cached is None:
+        return _fetch(asset_class, ticker)
+
+    @cached(ttl=24 * 3600, key="features_inline_quarterly:{asset_class}:{ticker}")
+    def _fetch_cached(asset_class: str, ticker: str):
+        return _fetch(asset_class, ticker)
+
+    try:
+        return _fetch_cached(asset_class, ticker)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def build_features_inline(
     asset_class: str,
     ticker: str,
@@ -203,6 +255,40 @@ def build_features_inline(
                 f.drop(columns=[c for c in ("ticker", "asset_class", "source") if c in f.columns]),
                 left_on="date", right_on="run_date", direction="backward",
             )
+
+    # Phase 28.5 (Tier A2) — quarterly fundamentals merge.
+    # Mirrors build_training_set.py: fetch live quarterly statements,
+    # pivot to the q_* wide schema, and merge_asof(backward) so each row
+    # gets the most recent quarter known as-of that date. Produces the
+    # ~24 q_* columns + asof_date that the inference path was missing
+    # (silently median-filled before this fix). When yfinance has no
+    # statements for a micro-cap, the q_* columns stay NaN and fall
+    # through to median-fill — correct for fundamentals (a missing
+    # balance sheet is not "zero assets") and counted toward the Tier A3
+    # data-coverage haircut.
+    if asset_class not in ("crypto", "fx"):
+        try:
+            qwide = _load_quarterly_wide(asset_class, ticker)
+            if qwide is not None and not qwide.empty:
+                qsub = qwide.copy()
+                if "ticker" in qsub.columns:
+                    qsub = qsub[qsub["ticker"].astype(str).str.upper() == ticker.upper()]
+                if not qsub.empty:
+                    qsub["asof_date"] = (pd.to_datetime(qsub["asof_date"], errors="coerce")
+                                           .dt.tz_localize(None).astype("datetime64[ns]"))
+                    qsub = qsub.sort_values("asof_date")
+                    out["date"] = (pd.to_datetime(out["date"], errors="coerce")
+                                     .dt.tz_localize(None).astype("datetime64[ns]"))
+                    out = out.sort_values("date")
+                    out = pd.merge_asof(
+                        out,
+                        qsub.drop(columns=[c for c in ("ticker", "asset_class")
+                                            if c in qsub.columns]),
+                        left_on="date", right_on="asof_date", direction="backward",
+                    )
+        except Exception as exc:  # noqa: BLE001
+            from omni.utils.logger import log
+            log.warning(f"quarterly fundamentals inline skipped: {exc}")
 
     # Phase 28.4 — quality composites (Sloan accruals, Piotroski F-Score,
     # AFP QMJ). Training path runs `add_quality` immediately after the
