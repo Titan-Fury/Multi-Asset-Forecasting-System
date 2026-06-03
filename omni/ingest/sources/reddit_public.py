@@ -39,6 +39,18 @@ _DEFAULT_SUBS_CRYPTO = ("CryptoCurrency", "CryptoMarkets")
 _RATE_SLEEP = 1.0
 _LAST_CALL = {"t": 0.0}
 
+# Phase 28.5 (Tier A4) — process-level cooldown after sustained blocking.
+# Reddit aggressively 403-blocks unauthenticated search.json from cloud
+# / datacenter IPs. We have no OAuth credentials, so once we see a 403
+# we stop hammering the host: skip ALL Reddit calls for _COOLDOWN_SECONDS
+# and return empty immediately. This kills the 6-WARN-per-ticker log
+# spam + ~6s of dead latency the probe surfaced, and the missing news
+# now degrades cleanly to the Tier A1 narrative true-zeros. Failures are
+# logged at DEBUG (not WARN) since a blocked optional source is expected,
+# not actionable.
+_COOLDOWN_SECONDS = 30 * 60
+_BLOCKED_UNTIL = {"t": 0.0}
+
 
 def _polite_sleep() -> None:
     """Ensure at least ``_RATE_SLEEP`` seconds between outgoing calls."""
@@ -57,23 +69,51 @@ def _subs_for(asset_class: str) -> tuple[str, ...]:
 
 
 def _search_one(sub: str, query: str, limit: int = 25) -> list[dict]:
-    """Fetch search.json for a single subreddit. Empty on any failure."""
-    url = (f"https://www.reddit.com/r/{sub}/search.json"
-           f"?q={requests.utils.quote(query)}"
-           f"&restrict_sr=1&sort=new&limit={limit}&t=month")
-    try:
-        _polite_sleep()
-        r = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
-        if r.status_code == 429:
-            log.warning(f"reddit 429 on r/{sub} — backing off")
-            return []
-        r.raise_for_status()
-        data = r.json() or {}
-        children = data.get("data", {}).get("children", []) or []
-        return [c.get("data", {}) for c in children if isinstance(c, dict)]
-    except Exception as e:
-        log.warning(f"reddit search r/{sub} q={query!r} failed: {e}")
+    """Fetch search.json for a single subreddit. Empty on any failure.
+
+    Phase 28.5 (Tier A4) — honours a process-level cooldown after a 403
+    so a blocked host isn't hammered once per ticker, tries old.reddit.com
+    as a fallback on the first 403, and logs failures at DEBUG.
+    """
+    # Cooldown gate: if we were recently blocked, skip silently.
+    if time.monotonic() < _BLOCKED_UNTIL["t"]:
         return []
+
+    path = (f"/r/{sub}/search.json"
+            f"?q={requests.utils.quote(query)}"
+            f"&restrict_sr=1&sort=new&limit={limit}&t=month")
+    hosts = ("https://www.reddit.com", "https://old.reddit.com")
+    for hi, host in enumerate(hosts):
+        try:
+            _polite_sleep()
+            r = requests.get(host + path, headers=_HEADERS, timeout=_TIMEOUT)
+            if r.status_code == 429:
+                log.debug(f"reddit 429 on r/{sub} — backing off")
+                return []
+            if r.status_code == 403:
+                # Try the next host before giving up; if the last host is
+                # also blocked, trip the process-level cooldown so we stop
+                # hammering Reddit for every subsequent ticker.
+                if hi == len(hosts) - 1:
+                    _BLOCKED_UNTIL["t"] = time.monotonic() + _COOLDOWN_SECONDS
+                    log.debug(
+                        f"reddit 403 (all hosts) on r/{sub} — cooling down "
+                        f"{_COOLDOWN_SECONDS // 60}min; no Reddit signal until then"
+                    )
+                    return []
+                continue
+            r.raise_for_status()
+            data = r.json() or {}
+            children = data.get("data", {}).get("children", []) or []
+            return [c.get("data", {}) for c in children if isinstance(c, dict)]
+        except Exception as e:
+            # DEBUG (not WARN): a blocked / flaky optional source is
+            # expected and non-actionable; A1 narrative true-zeros cover
+            # the missing signal.
+            log.debug(f"reddit search r/{sub} q={query!r} failed: {e}")
+            if hi == len(hosts) - 1:
+                return []
+    return []
 
 
 def _score_post(p: dict) -> float:
