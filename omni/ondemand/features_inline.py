@@ -284,6 +284,55 @@ def build_features_inline(
     except Exception as exc:  # noqa: BLE001
         from omni.utils.logger import log
         log.warning(f"sentiment_z failed: {exc}")
+
+    # Phase 28.5 (Tier A1) — news-narrative true-zeros.
+    # When a ticker has NO scored news (empty feed, or a blocked source
+    # like Reddit 403), the sentiment merge above is skipped and
+    # `add_sentiment_z` no-ops because it requires `sent_mean`. The result
+    # is that ~8 news-derived columns are absent from the frame and get
+    # silently median-filled in `_align_to_universal` — i.e. a no-news
+    # micro-cap is scored as if it had AVERAGE news activity, which is
+    # wrong. The semantically-correct value for a no-news stock is ZERO
+    # articles / zero panic ratio / no flags, not the training median.
+    #
+    # We only set a default when the column is ABSENT or all-NaN, so real
+    # sentiment values (when news exists) are never clobbered. The `*_pct`
+    # cross-sectional rank columns are intentionally NOT touched here —
+    # a rank is relative, so the neutral 0.5 placeholder applied by the
+    # block below is the right default for those.
+    _NARRATIVE_ZERO_DEFAULTS = {
+        # counts → 0 (truly zero articles / mentions)
+        "n_articles": 0.0,
+        "panic_kw_count": 0.0,
+        "promoter_kw_count": 0.0,
+        "sebi_kw_count": 0.0,
+        "twitter_n_24h": 0.0,
+        # scores / ratios / momentum → 0.0 (neutral, no signal)
+        "sent_mean": 0.0,
+        "sent_std": 0.0,
+        "sent_pos_share": 0.0,
+        "sent_neg_share": 0.0,
+        "sent_momentum_7d": 0.0,
+        "sent_z_30d": 0.0,
+        "sent_accel_3d": 0.0,
+        "panic_keyword_ratio": 0.0,
+        "news_volume_z_60d": 0.0,
+        # flags → 0.0 (no promoter / SEBI news in window)
+        "promoter_news_flag": 0.0,
+        "sebi_action_flag": 0.0,
+    }
+    try:
+        for _col, _default in _NARRATIVE_ZERO_DEFAULTS.items():
+            if _col not in out.columns:
+                out[_col] = _default
+            else:
+                # Fill only the live (last) row's NaN; preserve any real
+                # historical values already merged in.
+                out[_col] = out[_col].fillna(_default)
+    except Exception as exc:  # noqa: BLE001
+        from omni.utils.logger import log
+        log.warning(f"narrative zero-fill failed: {exc}")
+
     # Phase 28 — cross-sectional rank parity.
     # PRIOR BUG: this block emitted 0.5 placeholders for every `*_pct` column
     # because a single live row trivially has rank 0.5 within its own
