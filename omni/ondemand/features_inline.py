@@ -202,6 +202,27 @@ def build_features_inline(
     if prices is None or prices.empty:
         return pd.DataFrame()
 
+    # Phase 28.6 — causal OHLCV bad-tick / outlier sanitiser. Runs BEFORE
+    # both technical.compute and targets.compute so a corrupt bar can't
+    # poison the rolling features OR the forward labels (both read this
+    # same frame). Leak-free (trailing stats + abs caps above circuit
+    # limits). Gated by an env var purely so the A/B control run can
+    # disable it without a code edit; on by default.
+    import os as _os
+    if _os.getenv("OMNI_DISABLE_OHLCV_SANITIZE", "0") != "1":
+        try:
+            from omni.ingest.sanitize import sanitize_ohlcv
+            prices, _san_stats = sanitize_ohlcv(prices, asset_class)
+            if (_san_stats["n_dropped_integrity"] + _san_stats["n_dropped_extreme"]
+                    + _san_stats["n_dup"]) > 0:
+                from omni.utils.logger import log
+                log.info(f"ohlcv sanitize [{asset_class}/{ticker}]: {_san_stats}")
+        except Exception as exc:  # noqa: BLE001
+            from omni.utils.logger import log
+            log.warning(f"ohlcv sanitize skipped for {ticker}: {exc}")
+        if prices is None or prices.empty:
+            return pd.DataFrame()
+
     tech = _tech.compute(prices)
     out = tech.copy()
     out["ticker"] = ticker

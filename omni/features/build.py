@@ -84,6 +84,16 @@ def build_for_ticker(asset_class: str, ticker: str,
         log.warning(f"no hot data for {asset_class}/{ticker}")
         return pd.DataFrame()
 
+    # Phase 28.6 — causal OHLCV bad-tick sanitiser before any feature/target
+    # compute (mirrors the on-demand path in features_inline). Leak-free.
+    try:
+        from omni.ingest.sanitize import sanitize_ohlcv
+        prices, _san = sanitize_ohlcv(prices, asset_class)
+        if (_san["n_dropped_integrity"] + _san["n_dropped_extreme"] + _san["n_dup"]) > 0:
+            log.info(f"ohlcv sanitize [{asset_class}/{ticker}]: {_san}")
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"ohlcv sanitize skipped for {ticker}: {e}")
+
     tech = _tech.compute(prices)
     out = tech.copy()
     out["ticker"] = ticker
