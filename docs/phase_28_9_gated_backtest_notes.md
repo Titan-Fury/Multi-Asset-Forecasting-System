@@ -1,4 +1,4 @@
-# Phase 28.9 — gated backtest is mis-calibrated (harness limitation)
+# Phase 28.9 — gated backtest short-bias = blend() 0.5-neutral vs TB base rate (NO production bug)
 
 ## Why
 
@@ -40,27 +40,54 @@ signed return). Direction breakdown is the smoking gun:
 
 ## Root cause
 
+**CORRECTION (supersedes the first-pass diagnosis below).** The original note
+blamed "missing calibration in `run_backtest`". That is WRONG. Reading
+`xgboost_5d.walkforward_fit` (lines 394-464) shows it ALREADY calibrates each
+fold leak-safely: inner-train fits XGBoost, the last-20% inner-val window fits
+an isotonic/beta calibrator, which is applied to the test fold. The per-fold
+`mean_proba≈0.33` is therefore *correct* calibration — it faithfully reflects
+the 33% "up" base rate of the TB label (calibration preserves the base rate).
+
+The true cause is a **base-rate / neutral-point mismatch in `ensemble/combine.py`
+`blend()`**. Direction is set by `blended > 0.5 ± band`, where
+`blended = w_model*proba_up + w_rubric*(rubric_total/100)`. The 0.5 neutral
+assumes `proba_up` is centered at 0.5. For a 33%-positive TB target the
+calibrated `proba_up` centers at 0.33, dragging `blended` below 0.5, so the
+gate emits ~99.5% short. The bias comes from the **backtest target choice**
+(`target=tb_label_5d`), not from any defect in calibration or in production.
+
+## Decision
+
+**There is no production bug.** Logged production predictions
+(`data/lake/predictions/`) show india `proba_up` mean = 0.491 (≈0.5) and a
+balanced, long-tilted direction split (+1: 227, 0: 146, -1: 107). The deployed
+universal model is effectively centered on a ~balanced target, so `blend()`'s
+0.5 neutral is appropriate and direction is healthy. The 99.5%-short was a
+**backtest-configuration artifact** (forcing the 33%-positive TB target), not a
+harness calibration gap and not a live failure. The 28.9 alarm was a FALSE
+ALARM; this correction is the authoritative record.
+
+**Latent fragility (optional hardening, not urgent):** `blend()`'s hardcoded
+0.5 neutral is only safe while the universal model's positive base rate is
+~50%. If the deployed universal model is ever retrained on a 33%-positive TB
+target, the same short bias would appear live. A base-rate-aware neutral
+(shift `proba_up` by `0.5 - base_rate`, or pass the training base rate into
+`BlendConfig`) would make the blend robust to either target. This touches
+production code, so it is offered as a decision, not an autonomous edit.
+
+The harness-independent read of deployed edge on this universe remains the 28.8
+finding: the raw model's realized-return decile spread is ~0, so any real edge
+comes from the conviction layer. Measuring that properly needs a larger sample
+of logged predictions via `scripts/daily_backtest.py` (only 480 rows / 15 dates
+exist today — too sparse for a statistically meaningful read).
+
+---
+
+### Original first-pass diagnosis (kept for the record — SUPERSEDED above)
+
 `run_backtest` calls `walkforward_fit` directly with default params — it does
 NOT apply the isotonic/beta calibration that the production trainer
 (`train_universal_model`) wraps around the model. With TB labels the positive
 ("up") class is the 33% minority, so the *uncalibrated* `proba_up` is centered
-near 0.33. The downstream blend/gate read that against a ~0.5 neutral point and
-call almost everything "down", so the gate emits a 99.5%-short signal on an
-index that rose over 2011–2026 — negative returns by construction.
-
-## Decision
-
-Do NOT conclude the deployed model loses money — this is a **harness
-limitation, not a production result**. The production scoring path calibrates
-probabilities before the gate, so deployed `proba_up` is correctly centered and
-direction is not degenerate. The fix (make `run_backtest` calibrate its OOF
-proba before the rubric/blend/gate, leak-safely across folds) is a behavioural
-change to evaluation code with real design choices and is left for explicit
-sign-off rather than an autonomous edit.
-
-The honest, harness-independent read of deployed edge on this universe remains
-the 28.8 finding: the raw model's realized-return decile spread is ~0, so any
-real edge must come from the calibrated conviction layer — which this harness
-cannot currently measure. Proper next step: evaluate the *logged* production
-predictions in `data/lake/predictions/` via `scripts/daily_backtest.py`
-(already calibrated, real deployed proba), or add calibration to `run_backtest`.
+near 0.33. [SUPERSEDED: walkforward_fit does calibrate; the real cause is the
+0.5 neutral in blend(), and production is unaffected.]
