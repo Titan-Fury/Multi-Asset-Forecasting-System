@@ -227,6 +227,20 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         log.warning(f"post-pool cross-sectional ranks failed: {exc}")
 
+    # Drop duplicate (date, ticker) rows. A few tickers carry overlapping
+    # vendor history segments (e.g. a re-listed symbol or a re-fetched
+    # window), so the per-ticker frames can emit the same (date, ticker)
+    # more than once. Left unchecked these duplicates silently overweight
+    # those rows in training AND fan out any downstream (date, ticker)
+    # join. Keep the last occurrence (most-recently-built segment wins).
+    if {"date", "ticker"}.issubset(df.columns):
+        n_before = len(df)
+        df = df.drop_duplicates(["date", "ticker"], keep="last").reset_index(drop=True)
+        n_dropped = n_before - len(df)
+        if n_dropped:
+            log.info(f"dropped {n_dropped:,} duplicate (date, ticker) rows "
+                      f"({n_before:,} -> {len(df):,})")
+
     # Persist
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out_path, index=False)
