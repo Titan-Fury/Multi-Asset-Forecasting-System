@@ -594,6 +594,9 @@ def prediction_card(card_dict: dict) -> None:
     last_intra = float(card_dict.get("last_intraday_price", 0.0) or 0.0)
     last_intra_at = str(card_dict.get("last_intraday_at", "") or "")
     coverage = card_dict.get("data_coverage", {}) or {}
+    # Phase 28.5 (Tier A3b) — feature-coverage badge inputs.
+    coverage_pct = float(card_dict.get("data_coverage_pct", 100.0) or 100.0)
+    quality_warning = str(card_dict.get("feature_quality_warning", "") or "")
     currency = "₹" if ac == "india" else ("$" if ac in ("us", "crypto") else "")
 
     # ---- section 1: header ----
@@ -710,6 +713,24 @@ def prediction_card(card_dict: dict) -> None:
         f"</div>"
     )
     st.markdown(stats_html, unsafe_allow_html=True)
+
+    # Phase 28.5 (Tier A3b) — feature-coverage badge. Only shown when the
+    # conviction was dampened (warning set), so well-covered names stay
+    # uncluttered. Renders an amber chip explaining that the model was
+    # served imputed values for a chunk of its features, with the
+    # data-coverage percent, so the user knows the conviction is honest.
+    if quality_warning:
+        warn_html = (
+            f"<div style='margin-top:var(--space-2);padding:var(--space-2) "
+            f"var(--space-3);background:rgba(245,158,11,0.10);"
+            f"border:1px solid rgba(245,158,11,0.45);border-radius:8px;"
+            f"display:flex;align-items:center;gap:8px'>"
+            f"<span style='font-size:var(--text-base)'>&#9888;</span>"
+            f"<span style='font-size:var(--text-sm);color:var(--text-secondary)'>"
+            f"<b>{coverage_pct:.0f}% data coverage</b> &middot; "
+            f"{_esc(quality_warning)}</span></div>"
+        )
+        st.markdown(warn_html, unsafe_allow_html=True)
 
     # ---- section 3: horizon projections ----
     if last_close > 0:
