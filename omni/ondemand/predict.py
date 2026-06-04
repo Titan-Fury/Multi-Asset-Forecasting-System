@@ -87,6 +87,14 @@ class PredictionCard:
     last_intraday_price: float = 0.0
     last_intraday_at: str = ""
     data_coverage: dict = field(default_factory=dict)
+    # Phase 28.5 (Tier A3) — feature-coverage haircut. `data_coverage_pct`
+    # is 100*(1 - imputed_frac): the share of the model's contract features
+    # actually produced (vs median-filled) for this row. When coverage is
+    # low, conviction is dampened and `feature_quality_warning` carries a
+    # human-readable note the UI renders as an amber badge. Default 100/""
+    # so well-covered names and existing callers are unaffected.
+    data_coverage_pct: float = 100.0
+    feature_quality_warning: str = ""
     # ---- intraday microstructure (Part A) ----
     intraday_return_pct: float = 0.0
     gap_open_pct: float = 0.0
@@ -184,6 +192,41 @@ def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
         pass
     aligned = aligned.fillna(medians).fillna(0.0)
     return aligned.to_numpy(dtype=float)
+
+
+def _feature_coverage(produced: pd.DataFrame, horizon_days: int = 5) -> dict:
+    """How much of the model's contract did we actually produce for this row?
+
+    Phase 28.5 (Tier A3) — returns {n_missing, n_total, imputed_frac} by
+    comparing the trained feature contract (the sidecar written at training
+    time) against the produced frame. A contract column counts as "imputed"
+    when it is ABSENT from the frame or NaN on the live (last) row — both
+    cases get silently median-filled in `_align_to_universal`, so the model
+    is served a guess rather than a real value. `imputed_frac` drives the
+    conviction haircut in `_build_card`. Fails safe to zero imputation
+    (no haircut) when the contract can't be read."""
+    try:
+        from omni.features.contract import read_contract
+        from omni.ondemand import model_registry as _mr
+        blob, _meta = _mr._paths_for(int(horizon_days))
+        contract_cols = read_contract(blob)
+        if not contract_cols:
+            return {"n_missing": 0, "n_total": 0, "imputed_frac": 0.0}
+        n_total = len(contract_cols)
+        if produced is None or produced.empty:
+            return {"n_missing": n_total, "n_total": n_total, "imputed_frac": 1.0}
+        last = produced.tail(1)
+        n_missing = 0
+        for c in contract_cols:
+            if c not in last.columns:
+                n_missing += 1
+            elif bool(pd.isna(last.iloc[0].get(c))):
+                n_missing += 1
+        frac = float(n_missing) / float(n_total) if n_total else 0.0
+        return {"n_missing": int(n_missing), "n_total": int(n_total),
+                "imputed_frac": frac}
+    except Exception:  # noqa: BLE001
+        return {"n_missing": 0, "n_total": 0, "imputed_frac": 0.0}
 
 
 # ============================================================================
@@ -876,6 +919,33 @@ def _build_card(
         "data_quality_score": int(bundle.provenance.data_quality_score) if bundle.provenance else 0,
     }
 
+    # Phase 28.5 (Tier A3) — feature-coverage conviction haircut.
+    # When a large share of the model's contract features were absent /
+    # NaN for this row (e.g. a no-news, no-fundamentals micro-cap whose
+    # values get median-filled), the model is effectively guessing on
+    # those splits. We dampen conviction proportionally so a data-starved
+    # name can't masquerade as a high-conviction call, and surface a
+    # human-readable warning the UI renders as an amber badge. Well-covered
+    # names (imputed_frac <= 0.15) are untouched. Mirrors the circuit
+    # shrinker's "shrink-don't-overrule" philosophy.
+    _conv = float(row.get("conviction", 0.0))
+    _cov = _feature_coverage(feats_full, horizon_days=5)
+    _imp = float(_cov.get("imputed_frac", 0.0))
+    _coverage_pct = round(100.0 * (1.0 - _imp), 1)
+    _quality_warn = ""
+    if _imp > 0.15:
+        _mult = min(1.0, max(0.5, 1.0 - 1.2 * (_imp - 0.15)))
+        _conv = _conv * _mult
+        _quality_warn = (f"low data coverage: {round(100.0 * _imp)}% of model "
+                         f"features imputed ({_cov.get('n_missing', 0)}/"
+                         f"{_cov.get('n_total', 0)}) — conviction dampened "
+                         f"{round(100.0 * (1.0 - _mult))}%")
+        log.info(
+            f"coverage haircut [{bundle.ticker}]: imputed={_imp:.2f} "
+            f"({_cov.get('n_missing', 0)}/{_cov.get('n_total', 0)}) "
+            f"-> conviction *= {_mult:.2f}"
+        )
+
     return PredictionCard(
         ticker=bundle.ticker,
         asset_class=bundle.asset_class,
@@ -884,7 +954,7 @@ def _build_card(
         direction=int(_conformal_dir_override
                       if _conformal_dir_override is not None
                       else row.get("direction", 0)),
-        conviction=float(row.get("conviction", 0.0)),
+        conviction=float(_conv),
         blended_p=float(row.get("blended_p", 0.0)),
         proba_up=float(proba_up),
         rubric_total=float(rub.rubric_total),
@@ -914,6 +984,8 @@ def _build_card(
         last_intraday_price=float(intraday.get("last_intraday_price", 0.0) or 0.0),
         last_intraday_at=str(intraday.get("last_intraday_at", "") or ""),
         data_coverage=coverage,
+        data_coverage_pct=_coverage_pct,
+        feature_quality_warning=_quality_warn,
         intraday_return_pct=float(intraday_feats.get("intraday_return_pct", 0.0)),
         gap_open_pct=float(intraday_feats.get("gap_open_pct", 0.0)),
         vwap_dev_bps=float(intraday_feats.get("vwap_dev_bps", 0.0)),
