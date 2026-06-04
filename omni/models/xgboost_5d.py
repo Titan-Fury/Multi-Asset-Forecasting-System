@@ -328,6 +328,31 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
         tree_method="hist", random_state=42,
         monotone_constraints=_build_monotone_constraints(feat_cols),
     )
+    # Phase 28.6 — env-var tuning overrides for the three axes the Phase
+    # 28.4 retrain changed (max_depth 5->6, min_child_weight 5->3,
+    # colsample_bylevel ->0.7). Lets an A/B matrix isolate which axis drove
+    # the 0.5402->0.5156 regression without editing code per run. Unset =
+    # current defaults, so production behaviour is unchanged.
+    import os as _os_hp
+
+    def _env_num(name: str, cast):
+        v = _os_hp.environ.get(name, "").strip()
+        if not v:
+            return None
+        try:
+            return cast(v)
+        except Exception:  # noqa: BLE001
+            return None
+
+    _md = _env_num("OMNI_XGB_MAX_DEPTH", int)
+    if _md is not None:
+        params["max_depth"] = _md
+    _mcw = _env_num("OMNI_XGB_MIN_CHILD_WEIGHT", float)
+    if _mcw is not None:
+        params["min_child_weight"] = _mcw
+    _csbl = _env_num("OMNI_XGB_COLSAMPLE_BYLEVEL", float)
+    if _csbl is not None:
+        params["colsample_bylevel"] = _csbl
     # Phase 22 — opt-in GPU: set OMNI_XGB_DEVICE=cuda to use the local GPU.
     # Defaults to CPU so existing CI / non-GPU envs keep working.
     import os as _os
