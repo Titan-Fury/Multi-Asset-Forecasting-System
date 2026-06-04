@@ -174,7 +174,19 @@ def main() -> int:
 
         # Merge quarterly fundamentals via merge_asof so each price row gets
         # the most recent quarter's metrics that were known at that date.
+        #
+        # Phase 28.5 — `build_features_inline` now also emits q_* + asof_date
+        # via its own LIVE yfinance fetch (Tier A2, meant for the inference
+        # path where there's no lake). At training time the lake-backed
+        # `quarterly_wide` is the canonical, deterministic source, so when it
+        # is present we DROP the inline-produced q_*/asof_date first to avoid
+        # a merge_asof column collision (q_total_assets_x / _y). When the lake
+        # has no quarterly data we keep the inline columns as the only source.
         if not quarterly_wide.empty:
+            inline_q = [c for c in feats.columns
+                        if c.startswith("q_") or c == "asof_date"]
+            if inline_q:
+                feats = feats.drop(columns=inline_q)
             qsub = quarterly_wide[quarterly_wide["ticker"] == ticker.upper()].copy()
             if not qsub.empty:
                 qsub = qsub.sort_values("asof_date")
