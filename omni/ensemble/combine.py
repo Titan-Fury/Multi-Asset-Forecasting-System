@@ -45,12 +45,37 @@ class BlendConfig:
     w_model: float = 0.6
     w_rubric: float = 0.4
     neutral_band: float = 0.02  # +/- around 0.5
+    # Phase 28.10 — optional base-rate correction. `blend()` treats 0.5 as the
+    # neutral point, which assumes `proba_up` is centered at 0.5. That holds
+    # for a model trained on a ~balanced target, but a model trained on an
+    # imbalanced label (e.g. triple-barrier with ~33% "up") emits CALIBRATED
+    # probabilities centered at its base rate (~0.33), so a fixed 0.5 neutral
+    # reads almost everything as "down" and the gate degenerates to ~all-short
+    # (see docs/phase_28_9_gated_backtest_notes.md). When set to the model's
+    # training positive base rate, proba_up is re-centered to a 0.5 prior via
+    # prior-correction BEFORE blending. Default None = no correction = current
+    # behaviour preserved byte-for-byte for the deployed ~balanced model.
+    model_base_rate: float | None = None
 
     def __post_init__(self):
         s = self.w_model + self.w_rubric
         if abs(s - 1.0) > 1e-6:
             self.w_model = self.w_model / s
             self.w_rubric = self.w_rubric / s
+
+
+def _recenter_to_uniform_prior(p: np.ndarray, base_rate: float) -> np.ndarray:
+    """Prior-correct probabilities from a `base_rate` prior to a 0.5 prior.
+
+    Standard class-prior-shift adjustment: p_adj = p*(1-b) / (p*(1-b) + (1-p)*b).
+    Maps b -> 0.5, is monotone in p, and stays in [0, 1]. NaNs pass through.
+    """
+    b = float(base_rate)
+    num = p * (1.0 - b)
+    den = num + (1.0 - p) * b
+    with np.errstate(invalid="ignore", divide="ignore"):
+        adj = np.where(den > 0, num / den, p)
+    return adj
 
 
 def _soft_model_weight(out: pd.DataFrame, cfg: BlendConfig) -> np.ndarray:
@@ -107,6 +132,11 @@ def blend(df: pd.DataFrame, *, cfg: BlendConfig | None = None) -> pd.DataFrame:
         raise KeyError("blend() requires 'proba_up' and 'rubric_total' columns")
     out = df.copy()
     p = out["proba_up"].astype(float)
+    # Phase 28.10 — optional base-rate correction (default off; see BlendConfig).
+    if cfg.model_base_rate is not None and 0.0 < cfg.model_base_rate < 1.0 \
+            and abs(cfg.model_base_rate - 0.5) > 1e-9:
+        p = pd.Series(_recenter_to_uniform_prior(p.to_numpy(), cfg.model_base_rate),
+                      index=p.index)
     r = (out["rubric_total"].astype(float) / 100.0).clip(0, 1)
 
     w_model_per_row = _soft_model_weight(out, cfg)
