@@ -28,7 +28,6 @@ from omni.utils.logger import log
 from omni.models.conformal import (
     ConformalIntervalCalibrator,
     fit_interval_calibrator,
-    empirical_coverage,
 )
 from omni.ondemand.model_registry import load_horizon as _load_universal
 
@@ -119,9 +118,6 @@ def main() -> int:
     cal: ConformalIntervalCalibrator = fit_interval_calibrator(
         residuals, sigmas, alpha=args.alpha,
     )
-    cov = empirical_coverage(
-        np.asarray([0.0]), np.asarray([0.0]), np.asarray([1.0]), cal,
-    )  # sanity stub
 
     # Re-evaluate empirical coverage on the calibration set itself (will be
     # ~1-alpha by construction, but verify).
@@ -132,7 +128,7 @@ def main() -> int:
     out_path = Path(args.out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(cal, out_path)
-    print(f"[4/4] done.")
+    print("[4/4] done.")
     print(f"      alpha:       {cal.alpha}  (target coverage = {1 - cal.alpha:.0%})")
     print(f"      quantile:    {cal.quantile:.3f}")
     print(f"      empirical coverage on cal set: {emp_cov:.3f}")

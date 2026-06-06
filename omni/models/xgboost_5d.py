@@ -67,41 +67,6 @@ def prepare_xy(df: pd.DataFrame, *, target: str = "fwd_dir_5d"
     return X, y, list(X.columns)
 
 
-def walkforward_splits(dates: pd.Series, *, n_folds: int = 5,
-                       min_train: int = 252,
-                       embargo_days: int = 0) -> Iterable[tuple[np.ndarray, np.ndarray]]:
-    """Yield (train_idx, test_idx) tuples in chronological order.
-
-    Each fold's test window is the next slab; train is everything before it.
-
-    Phase 28 — `embargo_days` skips a buffer between train_end and test_start
-    so that fwd-H labels at the train boundary don't leak into the test fold.
-    Default 0 keeps backward compatibility; `walkforward_fit` defaults to
-    `horizon_days + 1` (typically 6 for 5d targets) which is the textbook
-    purged-CV embargo.
-    """
-    order = np.argsort(dates.values)
-    n = len(order)
-    if n <= min_train + n_folds:
-        raise ValueError(f"not enough rows ({n}) for {n_folds} folds")
-    fold_size = (n - min_train) // n_folds
-    embargo = max(0, int(embargo_days))
-    for k in range(n_folds):
-        train_end = min_train + k * fold_size
-        test_start = train_end + embargo
-        test_end = min(n, test_start + fold_size)
-        if test_end <= test_start:
-            break
-        # Drop the last `embargo` rows from the train side too — those rows'
-        # forward labels span into the test window and would leak across the
-        # gap if we kept them.
-        train_idx = order[: max(0, train_end - embargo)]
-        test_idx = order[test_start:test_end]
-        if len(train_idx) == 0 or len(test_idx) == 0:
-            continue
-        yield train_idx, test_idx
-
-
 @dataclass
 class FoldResult:
     fold: int

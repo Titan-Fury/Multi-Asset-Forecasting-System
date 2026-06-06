@@ -28,7 +28,7 @@ except Exception:
 
 import pandas as pd
 
-from omni.monitoring.drift import psi_per_feature, severity
+from omni.monitoring.drift import psi_per_feature
 from omni.utils.logger import log
 
 
