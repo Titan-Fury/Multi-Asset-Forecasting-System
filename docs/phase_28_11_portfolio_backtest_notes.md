@@ -1,5 +1,13 @@
 # Phase 28.11 — Tier-0 cost-aware portfolio backtest (Sharpe/maxDD/turnover)
 
+> **CORRECTION (see Phase 28.12).** The Sharpe figures in the table below were
+> INFLATED by an overlapping-return bug: each h-day trade was amortized into h
+> equal daily legs, fabricating an artificially smooth daily series. Fixed in
+> commit `67e405c` (non-overlapping h-day periods). Corrected numbers:
+> base-rate **OFF Sharpe −1.78** (was −4.02), **ON Sharpe +0.74** (was +1.71).
+> The qualitative read is UNCHANGED: OFF is catastrophic; ON is positive but
+> `avg_trade_ret` stays negative (−0.0079) → beta + concentration, not alpha.
+
 ## What & why
 
 First item of `docs/prediction_efficiency_research.md`: the harness could only
