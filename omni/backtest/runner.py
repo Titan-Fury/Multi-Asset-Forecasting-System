@@ -123,6 +123,14 @@ def run_backtest(features: pd.DataFrame,
         gated_with_y = gated.copy()
         gated_with_y["y_true"] = (gated_with_y["fwd_ret_5d"] > 0).astype(int)
         rep.summary["gated"] = _metrics.gated_metrics(gated_with_y)
+        # Phase 28.11 — cost-aware portfolio metrics (Sharpe / max-DD / turnover)
+        # on the gated long/short book. This is the "would trading it make money
+        # after costs?" view that point-wise metrics can't give.
+        from omni.backtest import portfolio as _portfolio
+        # Holding horizon matches the realized-return column used above (fwd_ret_5d).
+        pm = _portfolio.simulate_portfolio(gated, horizon=5, cost_bps=15.0)
+        pm.pop("_daily_returns", None)
+        rep.summary["portfolio"] = pm
 
     # --- shuffled baseline
     if run_shuffled_baseline:
