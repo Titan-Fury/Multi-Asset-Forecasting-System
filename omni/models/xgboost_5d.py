@@ -384,13 +384,25 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     # actually leaks (a row at (T1, t-3) doesn't leak into a val row at
     # (T2, t)). The per-ticker purge keeps those rows. The stack-mode
     # trainer has used this since Phase 24.18; single-mode was lagging.
-    from omni.cv.purged_kfold import purged_kfold_indices
+    from omni.cv.purged_kfold import purged_kfold_indices, strict_walkforward_splits
     res = WalkForwardResult(feature_cols=feat_cols)
-    splits = purged_kfold_indices(
-        dates, n_folds=n_folds,
-        horizon_days=horizon, embargo_days=embargo_days,
-        tickers=tickers,
-    )
+    import os as _os_cv
+    _cv_mode = _os_cv.environ.get("OMNI_CV_MODE", "purged").strip().lower()
+    if _cv_mode == "strict":
+        # Phase 28.13 — strict expanding-window walk-forward (past-only). Honest
+        # for trading simulation (no future regimes leak into an early fold),
+        # vs the default bidirectional purged k-fold which is the gold standard
+        # for generalization AUC. Opt-in via OMNI_CV_MODE=strict.
+        splits = strict_walkforward_splits(
+            dates, n_folds=n_folds,
+            horizon_days=horizon, embargo_days=embargo_days,
+        )
+    else:
+        splits = purged_kfold_indices(
+            dates, n_folds=n_folds,
+            horizon_days=horizon, embargo_days=embargo_days,
+            tickers=tickers,
+        )
     for k, (tr_idx, te_idx) in enumerate(splits):
         # Inner split: last 20% of train window for calibration (time-ordered)
         n_inner = max(1, int(len(tr_idx) * inner_val_frac))

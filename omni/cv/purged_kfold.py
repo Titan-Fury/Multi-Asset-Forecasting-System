@@ -141,6 +141,56 @@ def purged_kfold_indices(
     return folds
 
 
+def strict_walkforward_splits(
+    dates: pd.Series | pd.DatetimeIndex,
+    *,
+    n_folds: int = 5,
+    horizon_days: int = 5,
+    embargo_days: int = 5,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Strict expanding-window walk-forward (past-only training).
+
+    Unlike `purged_kfold_indices` (which is bidirectional — training for an
+    early fold may include later-dated rows), this NEVER trains on data dated at
+    or after a test fold. The timeline is cut into `n_folds + 1` contiguous
+    segments; fold k (k = 1..n_folds) tests segment k and trains ONLY on
+    segments 0..k-1, dropping the `horizon + embargo` days immediately before the
+    test window. This is the honest simulation of live trading (the model at any
+    point has only seen the past), at the cost of smaller early-fold train sets.
+
+    Returns (train_pos, test_pos) in ORIGINAL positional indices, with
+    `train_pos` already sorted ascending by date so a caller's time-ordered
+    inner-validation split (`train[:-k]` / `train[-k:]`) stays valid.
+    """
+    if not isinstance(dates, pd.Series):
+        dates = pd.Series(pd.to_datetime(dates))
+    else:
+        dates = pd.to_datetime(dates).reset_index(drop=True)
+    n = len(dates)
+    if n_folds < 2:
+        raise ValueError("n_folds must be >= 2")
+
+    order = np.argsort(dates.values, kind="stable")   # positions sorted by date
+    sorted_dates = dates.values[order]
+    edges = np.linspace(0, n, n_folds + 2).astype(int)  # n_folds+1 segments
+    gap = np.timedelta64(int(horizon_days + embargo_days), "D")
+
+    folds: list[tuple[np.ndarray, np.ndarray]] = []
+    for k in range(1, n_folds + 1):
+        te_lo, te_hi = edges[k], edges[k + 1]
+        if te_lo >= te_hi:
+            continue
+        test_pos = order[te_lo:te_hi]
+        cutoff = np.datetime64(pd.Timestamp(sorted_dates[te_lo])) - gap
+        candidate = order[:te_lo]                      # strictly earlier segments
+        keep = dates.values[candidate] <= cutoff
+        train_pos = candidate[keep]                    # stays date-sorted
+        if len(train_pos) == 0 or len(test_pos) == 0:
+            continue
+        folds.append((train_pos, test_pos))
+    return folds
+
+
 def assert_no_leakage(
     folds: list[tuple[np.ndarray, np.ndarray]],
     dates: pd.Series,
