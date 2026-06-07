@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import os
 import re
-from xml.etree import ElementTree as _ET
+# defusedxml hardens parsing of untrusted remote XML (Form 4 filings) against
+# entity-expansion / XXE attacks. It is a declared dependency, so we require it
+# rather than falling back to the vulnerable stdlib parser.
+import defusedxml.ElementTree as _ET
 
 import pandas as pd
 import requests

@@ -61,7 +61,7 @@ class Chunk:
             self.ticker, self.doc_type, self.source, self.date_iso,
             str(self.chunk_index), self.text[:200],
         ])
-        h = hashlib.sha1(key.encode("utf-8")).digest()
+        h = hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).digest()
         # Qdrant accepts uint64 ids; take low 64 bits of sha1
         return str(int.from_bytes(h[:8], "big"))
 

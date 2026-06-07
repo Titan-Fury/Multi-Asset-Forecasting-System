@@ -34,7 +34,7 @@ _CACHE_TTL_DAYS = 90  # embeddings rarely go stale
 def _text_key(text: str) -> str:
     """Stable cache key. We hash both the model id and the text so changing
     the embedder version won't return stale vectors."""
-    h = hashlib.sha1((_CACHE_TASK + "::" + text).encode("utf-8")).hexdigest()
+    h = hashlib.sha1((_CACHE_TASK + "::" + text).encode("utf-8"), usedforsecurity=False).hexdigest()
     return h
 
 

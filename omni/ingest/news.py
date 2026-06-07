@@ -64,13 +64,16 @@ def _fetch_newsapi(query: str, *, lookback_days: int = 1, page_size: int = 100) 
 
 
 def _fetch_rss(feed_url: str) -> pd.DataFrame:
-    """Lightweight RSS parser without feedparser dep — uses requests + xml.etree."""
-    import xml.etree.ElementTree as ET
+    """Lightweight RSS parser without feedparser dep — uses requests + defusedxml."""
+    # defusedxml parses untrusted remote XML safely (blocks entity-expansion /
+    # XXE). It is a declared dependency, so we require it rather than falling
+    # back to the vulnerable stdlib parser.
+    from defusedxml.ElementTree import fromstring as _xml_fromstring
     try:
         r = requests.get(feed_url, timeout=20, headers={"User-Agent": "Omni_Stocks/0.1"})
         if r.status_code != 200:
             return pd.DataFrame(columns=_NEWS_COLS)
-        root = ET.fromstring(r.content)
+        root = _xml_fromstring(r.content)
         # Handle both RSS 2.0 (channel/item) and Atom (entry)
         items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
         rows = []
@@ -163,7 +166,7 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
             df = _normalize(_fetch_rss(feed))
             if df.empty:
                 continue
-            slug = hashlib.md5(feed.encode()).hexdigest()[:10]
+            slug = hashlib.md5(feed.encode(), usedforsecurity=False).hexdigest()[:10]
             tiers.save_raw(df, source="news_rss", asset_class="all",
                            ticker=slug, dedup_cols=["url"])
             combined_parts.append(df)

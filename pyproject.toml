@@ -55,6 +55,7 @@ dependencies = [
     # Infra
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "defusedxml>=0.7",
     "loguru>=0.7",
     "tenacity>=9.0",
     "tqdm>=4.66",
