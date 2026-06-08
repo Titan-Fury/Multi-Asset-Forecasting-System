@@ -14,12 +14,13 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import OrderedDict
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 
 from omni.llm.cache import LLMCache
-from omni.llm.embed_nemotron import EMBED_DIM, embed as _nemotron_embed, is_zero
+from omni.llm.embed_nemotron import EMBED_DIM, is_zero
+from omni.llm.embed_nemotron import embed as _nemotron_embed
 
 _log = logging.getLogger("omni.llm.rag.embedder")
 

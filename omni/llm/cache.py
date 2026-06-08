@@ -26,7 +26,7 @@ def _make_key(backend: str, task: str, prompt: str, params: dict[str, Any] | Non
 class LLMCache:
     """Lazy-init diskcache wrapper. Single instance per process."""
 
-    _instance: "LLMCache | None" = None
+    _instance: LLMCache | None = None
     _lock = __import__("threading").Lock()
 
     def __init__(self) -> None:
@@ -41,7 +41,7 @@ class LLMCache:
         log.debug(f"LLMCache initialized at {path} (limit {size_gb} GB)")
 
     @classmethod
-    def get(cls) -> "LLMCache":
+    def get(cls) -> LLMCache:
         # Double-checked locking: avoid lock cost on the common hot path
         # while still guaranteeing only one instance is constructed even
         # under concurrent dashboard requests.

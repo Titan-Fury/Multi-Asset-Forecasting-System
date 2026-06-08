@@ -23,7 +23,8 @@ from omni.llm.backends.base import BackendError
 from omni.llm.rag.chunker import chunk_news_dataframe
 from omni.llm.rag.embedder import get_embedder
 from omni.llm.rag.prompts import (
-    build_qa_prompt, build_signal_explanation_prompt,
+    build_qa_prompt,
+    build_signal_explanation_prompt,
 )
 from omni.llm.rag.retriever import HybridRetriever, RetrievedChunk
 from omni.llm.rag.store import RAGStore

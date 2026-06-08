@@ -47,7 +47,7 @@ def _get_finbert():
 
 
 class Router:
-    _instance: "Router | None" = None
+    _instance: Router | None = None
 
     def __init__(self) -> None:
         self.cfg = llm_routes()
@@ -66,7 +66,7 @@ class Router:
         self._BREAKER_THRESHOLD = 3
 
     @classmethod
-    def get(cls) -> "Router":
+    def get(cls) -> Router:
         if cls._instance is None:
             cls._instance = Router()
         return cls._instance

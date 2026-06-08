@@ -9,7 +9,6 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-
 # Phase 24.21 — shared module-level requests.Session with connection pooling.
 # Was a bare `requests.post()` per call across 5 backends (openrouter, groq,
 # gemini, ollama, embed_nemotron) which paid a fresh TCP+TLS handshake every
@@ -55,7 +54,7 @@ class LLMResult:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "LLMResult":
+    def from_dict(cls, d: dict) -> LLMResult:
         return cls(**d)
 
 

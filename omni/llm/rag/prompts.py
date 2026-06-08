@@ -12,9 +12,7 @@ models too but quality drops.
 """
 from __future__ import annotations
 
-
 from omni.llm.rag.retriever import RetrievedChunk
-
 
 _SYSTEM_SIGNAL_EXPLAIN = """You are a financial signal explainer. You will be \
 given a stock signal (LONG/SHORT/FLAT with conviction) and recent news context. \

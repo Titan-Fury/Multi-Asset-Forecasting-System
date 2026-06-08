@@ -41,7 +41,7 @@ import threading
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +75,7 @@ class DegradationMonitor:
                details: dict[str, Any] | None = None) -> None:
         """Record a degradation event. Safe to call from any thread."""
         ev = DegradationEvent(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             component=component,
             severity=severity,
             event=event,

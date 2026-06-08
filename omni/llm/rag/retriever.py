@@ -64,8 +64,8 @@ def _get_reranker():
         if _rerank_singleton is not None:
             return _rerank_singleton
         try:
-            from sentence_transformers import CrossEncoder  # type: ignore
             import torch  # type: ignore
+            from sentence_transformers import CrossEncoder  # type: ignore
             device = "cuda" if torch.cuda.is_available() else "cpu"
             _log.info("loading bge-reranker-base on device=%s", device)
             _rerank_singleton = CrossEncoder(
@@ -109,7 +109,7 @@ class RetrievedChunk:
     payload: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_payload(cls, p: dict, score: float) -> "RetrievedChunk":
+    def from_payload(cls, p: dict, score: float) -> RetrievedChunk:
         return cls(
             text=str(p.get("text", "")),
             ticker=str(p.get("ticker", "")),
