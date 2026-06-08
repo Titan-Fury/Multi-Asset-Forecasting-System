@@ -28,7 +28,7 @@ carry the decomposition fields written by `blend()`:
 """
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 # Streamlit / Plotly imports are lazy so importing this module never
 # pulls in the dashboard runtime when the prediction card is constructed

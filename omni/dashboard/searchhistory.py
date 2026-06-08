@@ -29,7 +29,7 @@ The file is bounded to 200 entries and rotated by `last_searched_at`.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HISTORY_PATH = Path("data/watchlist/search_history.json")
@@ -67,7 +67,7 @@ def record_search(ticker: str, asset_class: str, *,
     if not ticker:
         return
     ticker = ticker.upper().strip()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     items = _read()
     existing = next((i for i in items if i.get("ticker", "").upper() == ticker
                        and i.get("asset_class") == asset_class), None)

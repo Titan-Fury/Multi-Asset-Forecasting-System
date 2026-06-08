@@ -12,9 +12,9 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from omni.ingest.prices import fetch_prices
 from omni.ondemand.cache import TTL, cached
 from omni.ondemand.universe import _CURATED
-from omni.ingest.prices import fetch_prices
 from omni.utils.logger import log
 
 

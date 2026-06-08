@@ -9,8 +9,8 @@ fall back to a "—" tile rather than crashing the dashboard.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import streamlit as st
 

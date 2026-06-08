@@ -12,7 +12,6 @@ import pandas as pd
 
 from omni.dashboard.charts import render_html
 
-
 _LWC_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
 
 

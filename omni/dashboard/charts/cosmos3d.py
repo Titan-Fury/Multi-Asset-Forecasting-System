@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Iterable
+from collections.abc import Iterable
 
 from omni.dashboard.charts import render_html
 

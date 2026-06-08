@@ -24,8 +24,7 @@ Usage:
 """
 from __future__ import annotations
 
-from typing import Mapping
-
+from collections.abc import Mapping
 
 _MACRO_KNOBS = (
     # (key on card, label, min, max, step)
@@ -129,6 +128,7 @@ def _recompute(card: Mapping[str, object], *, regime: str,
     asset_class = str(card.get("asset_class", "us"))
     try:
         import pandas as pd
+
         from omni.ensemble.combine import blend
         from omni.ensemble.gate import apply as gate_apply
 

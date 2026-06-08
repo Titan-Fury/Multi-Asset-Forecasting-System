@@ -27,6 +27,7 @@ from __future__ import annotations
 # until we find the project root (the dir containing `omni/`) and prepend it.
 import sys as _sys
 from pathlib import Path as _Path
+
 _here = _Path(__file__).resolve()
 _root = None
 # Phase 24.13 — was `(_here.parent, *_here.parents)` which duplicates the
@@ -40,18 +41,18 @@ for _candidate in _here.parents:
         break
 del _sys, _Path, _here, _candidate, _root
 
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
+from html import escape as _esc
 
 import pandas as pd
 import streamlit as st
-from html import escape as _esc
 
 _log = logging.getLogger("omni.dashboard")
 
 from omni.dashboard import cache as _c
 from omni.dashboard import components as _u
-from omni.dashboard.theme import inject_theme, hero, pill
+from omni.dashboard.theme import hero, inject_theme, pill
 from omni.ondemand import model_registry
 from omni.ondemand.universe import Resolution, resolve, suggestions
 
@@ -560,8 +561,8 @@ def _build_tracked_universe(*, include_history: bool = True,
     """Deduped (ticker, asset_class, display_name) list from watchlist
     plus (optionally) recent searches. Used by Portfolio + Earnings tabs.
     """
-    from omni.dashboard import watchlist as _wl
     from omni.dashboard import searchhistory as _sh
+    from omni.dashboard import watchlist as _wl
 
     universe: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -626,8 +627,8 @@ def _render_portfolio_tab() -> None:
     fractions, applies a per-sector cap, displays as a sized table plus a
     summary KPI row.
     """
-    from omni.ondemand.predict import predict_ticker
     from omni.ondemand.kelly import kelly_from_card
+    from omni.ondemand.predict import predict_ticker
 
     st.markdown("### Portfolio mode")
     st.caption(
@@ -788,7 +789,7 @@ def _render_replay_section() -> None:
     cards as they were emitted, with realised forward returns attached."""
     from datetime import timedelta
     try:
-        from omni.monitoring.replay import replay_window, replay_summary
+        from omni.monitoring.replay import replay_summary, replay_window
     except Exception as exc:  # noqa: BLE001
         st.caption(f"_replay unavailable: {exc}_")
         return
@@ -844,7 +845,8 @@ def _render_earnings_tab() -> None:
     """Earnings-day specials: who's reporting next 7 days + per-ticker history."""
     try:
         from omni.ingest.earnings_calendar import (
-            next_earnings, earnings_history,
+            earnings_history,
+            next_earnings,
         )
     except Exception as exc:  # noqa: BLE001
         st.caption(f"_earnings calendar unavailable: {exc}_")
@@ -1323,23 +1325,22 @@ def _render_dev_tab() -> None:
                         st.code((rc.stdout + "\n" + rc.stderr)[-1500:], language="text")
                 except Exception as exc:  # noqa: BLE001
                     st.error(f"sync error: {exc}")
-    with cols[2]:
-        with st.expander("📅 How to schedule daily run", expanded=False):
-            st.markdown(
-                "**Windows (Task Scheduler):**\n"
-                "```\n"
-                "schtasks /create /tn OmniDaily /tr "
-                "\"C:\\Omni_Stocks\\.venv\\Scripts\\python.exe "
-                "C:\\Omni_Stocks\\scripts\\run_daily.py\" /sc daily /st 18:30\n"
-                "```\n"
-                "Runs every day at 6:30pm IST after market close.\n\n"
-                "**macOS / Linux (cron):**\n"
-                "```\n"
-                "30 18 * * 1-5 cd ~/Omni_Stocks && "
-                ".venv/bin/python scripts/run_daily.py >> data/daily.log 2>&1\n"
-                "```\n"
-                "Weekdays only; logs to `data/daily.log`."
-            )
+    with cols[2], st.expander("📅 How to schedule daily run", expanded=False):
+        st.markdown(
+            "**Windows (Task Scheduler):**\n"
+            "```\n"
+            "schtasks /create /tn OmniDaily /tr "
+            "\"C:\\Omni_Stocks\\.venv\\Scripts\\python.exe "
+            "C:\\Omni_Stocks\\scripts\\run_daily.py\" /sc daily /st 18:30\n"
+            "```\n"
+            "Runs every day at 6:30pm IST after market close.\n\n"
+            "**macOS / Linux (cron):**\n"
+            "```\n"
+            "30 18 * * 1-5 cd ~/Omni_Stocks && "
+            ".venv/bin/python scripts/run_daily.py >> data/daily.log 2>&1\n"
+            "```\n"
+            "Weekdays only; logs to `data/daily.log`."
+        )
 
     st.divider()
 
@@ -1689,7 +1690,7 @@ def _render_dev_tab() -> None:
                             "high": info.get("intraDayHighLow", {}).get("max"),
                             "low": info.get("intraDayHighLow", {}).get("min"),
                             "prev_close": info.get("previousClose"),
-                            "fetched_at": datetime.now(timezone.utc)
+                            "fetched_at": datetime.now(UTC)
                                 .strftime("%Y-%m-%d %H:%M:%S UTC"),
                         }
                     except Exception as exc:  # noqa: BLE001
@@ -1759,8 +1760,11 @@ def _render_predict_tab() -> None:
     # Lazy imports — avoid pulling pandas/xgboost into the sidebar render.
     # `predict_via_api` is the public entry point; it routes through the
     # FastAPI service when available and falls back to in-process otherwise.
-    from omni.ondemand.predict import deep_analysis, predict_ticker  # noqa: F401  (used by fallback)
     from omni.api.client import predict_via_api
+    from omni.ondemand.predict import (  # noqa: F401  (used by fallback)
+        deep_analysis,
+        predict_ticker,
+    )
 
     # Phase 24.8 — concise primary instruction with a tooltip for details.
     # Replaces the long "Type any ticker — searches NSE, NASDAQ, NYSE, ..."
@@ -1982,7 +1986,7 @@ def _render_predict_tab() -> None:
         progress_slot.empty(); skeleton_slot.empty()
         st.session_state["predict_last_card"] = card_dict
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
-            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+            datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"))
         _record_and_update_lru(res, card_dict)
     elif run_clicked:
         progress_slot, skeleton_slot = _show_loading(f"Predicting {res.ticker}")
@@ -2012,7 +2016,7 @@ def _render_predict_tab() -> None:
             return
         st.session_state["predict_last_card"] = card_dict
         st.session_state[f"_predict_generated_at_{res.ticker}"] = (
-            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+            datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"))
         _record_and_update_lru(res, card_dict)
 
     # Render last card from session_state (survives reruns)
@@ -2078,7 +2082,7 @@ def _lake_freshness() -> dict:
     lake manifest. Cached 60s so we don't re-read JSON on every rerun.
     Falls back gracefully when the manifest is absent (first-run)."""
     import json
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
         from omni.lake import paths as _lake_paths
         mf = _lake_paths.lake_root() / "manifest.json"
@@ -2091,7 +2095,7 @@ def _lake_freshness() -> dict:
         if not iso:
             return {"last_backfill_iso": None, "age_days": None, "n_tickers": None}
         ts = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        age = (datetime.now(timezone.utc) - ts).total_seconds() / 86400
+        age = (datetime.now(UTC) - ts).total_seconds() / 86400
         return {
             "last_backfill_iso": iso,
             "age_days": age,
@@ -2317,7 +2321,7 @@ def main() -> None:
         # Phase 24.5 — staleness indicator (warn if the regime model is >7d old)
         if last_run is not None:
             try:
-                age_days = (datetime.now(timezone.utc).date() - last_run.date()).days
+                age_days = (datetime.now(UTC).date() - last_run.date()).days
             except Exception:
                 age_days = 0
             if age_days > 30:
@@ -2350,7 +2354,7 @@ def main() -> None:
             f"{date_str}{stale_chip}</div>"
             f"<div style='font-size:10px;color:rgba(148,163,184,0.5);"
             f"margin-top:8px;letter-spacing:0.04em;'>"
-            f"Loaded {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</div>",
+            f"Loaded {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}</div>",
             unsafe_allow_html=True,
         )
 
@@ -2448,9 +2452,10 @@ def main() -> None:
     elif section == "Correlations":
         st.caption("D3 force-directed graph. Edge thickness ∝ |60-day correlation|. Drag nodes to rearrange.")
         try:
+            from concurrent.futures import ThreadPoolExecutor
+
             from omni.dashboard.charts.corrgraph import render_corrgraph
             from omni.lake.io import read_prices
-            from concurrent.futures import ThreadPoolExecutor
             tickers_pool = list(f["ticker"].unique())[:40] if not f.empty else []
             if not tickers_pool:
                 st.info("No tickers in the current filtered universe — adjust filters in the sidebar.")

@@ -171,7 +171,7 @@ def regime_banner(regime_df: pd.DataFrame) -> None:
 
 # ---------- sparkline helper (UI8) ----------
 
-def sparkline_svg(values: list[float] | "pd.Series", *, width: int = 80,
+def sparkline_svg(values: list[float] | pd.Series, *, width: int = 80,
                   height: int = 18) -> str:
     """Inline SVG polyline of a time series. Returns HTML string.
 
@@ -364,63 +364,61 @@ def calibration_panel(preds: pd.DataFrame) -> None:
     from omni.backtest.metrics import calibration_table, decile_lift
 
     c1, c2 = st.columns(2)
-    with c1:
-        with st.container(border=True):
-            st.markdown("**Reliability**")
-            tab = calibration_table(preds, n_bins=10)
-            if not tab.empty:
-                try:
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=tab["bin_mean_p"], y=tab["bin_mean_y"],
-                        mode="lines+markers", name="model",
-                        line=dict(color="#06b6d4", width=3),
-                        marker=dict(size=9, color="#8b5cf6",
-                                    line=dict(color="white", width=1)),
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=[0, 1], y=[0, 1], mode="lines", name="perfect",
-                        line=dict(color="rgba(148,163,184,0.5)", dash="dash"),
-                    ))
-                    fig.update_layout(**_plotly_layout(
-                        height=260,
-                        xaxis=dict(title="predicted p", range=[0, 1],
-                                   gridcolor="rgba(148,163,184,0.15)"),
-                        yaxis=dict(title="empirical hit rate", range=[0, 1],
-                                   gridcolor="rgba(148,163,184,0.15)"),
-                    ))
-                    st.plotly_chart(fig, width='stretch',
-                                    config={"displayModeBar": False})
-                except ImportError:
-                    tab["perfect"] = tab["bin_mean_p"]
-                    st.line_chart(tab.set_index("bin_mean_p")[["bin_mean_y", "perfect"]],
-                                  height=240)
-    with c2:
-        with st.container(border=True):
-            st.markdown("**Decile lift (mean realized 5d return)**")
-            lift = decile_lift(preds, n_bins=10)
-            if not lift.empty:
-                try:
-                    colors = ["#06b6d4" if v >= 0 else "#dc2626"
-                              for v in lift["mean_fwd_ret"]]
-                    fig = go.Figure(go.Bar(
-                        x=lift["decile"], y=lift["mean_fwd_ret"],
-                        marker=dict(color=colors,
-                                    line=dict(color="rgba(255,255,255,0.15)", width=1)),
-                        hovertemplate="decile %{x}: %{y:.3%}<extra></extra>",
-                    ))
-                    fig.update_layout(**_plotly_layout(
-                        height=260,
-                        xaxis=dict(title="proba decile",
-                                   gridcolor="rgba(148,163,184,0.15)"),
-                        yaxis=dict(title="mean fwd 5d return",
-                                   gridcolor="rgba(148,163,184,0.15)",
-                                   tickformat=".1%"),
-                    ))
-                    st.plotly_chart(fig, width='stretch',
-                                    config={"displayModeBar": False})
-                except ImportError:
-                    st.bar_chart(lift.set_index("decile")[["mean_fwd_ret"]], height=240)
+    with c1, st.container(border=True):
+        st.markdown("**Reliability**")
+        tab = calibration_table(preds, n_bins=10)
+        if not tab.empty:
+            try:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=tab["bin_mean_p"], y=tab["bin_mean_y"],
+                    mode="lines+markers", name="model",
+                    line=dict(color="#06b6d4", width=3),
+                    marker=dict(size=9, color="#8b5cf6",
+                                line=dict(color="white", width=1)),
+                ))
+                fig.add_trace(go.Scatter(
+                    x=[0, 1], y=[0, 1], mode="lines", name="perfect",
+                    line=dict(color="rgba(148,163,184,0.5)", dash="dash"),
+                ))
+                fig.update_layout(**_plotly_layout(
+                    height=260,
+                    xaxis=dict(title="predicted p", range=[0, 1],
+                               gridcolor="rgba(148,163,184,0.15)"),
+                    yaxis=dict(title="empirical hit rate", range=[0, 1],
+                               gridcolor="rgba(148,163,184,0.15)"),
+                ))
+                st.plotly_chart(fig, width='stretch',
+                                config={"displayModeBar": False})
+            except ImportError:
+                tab["perfect"] = tab["bin_mean_p"]
+                st.line_chart(tab.set_index("bin_mean_p")[["bin_mean_y", "perfect"]],
+                              height=240)
+    with c2, st.container(border=True):
+        st.markdown("**Decile lift (mean realized 5d return)**")
+        lift = decile_lift(preds, n_bins=10)
+        if not lift.empty:
+            try:
+                colors = ["#06b6d4" if v >= 0 else "#dc2626"
+                          for v in lift["mean_fwd_ret"]]
+                fig = go.Figure(go.Bar(
+                    x=lift["decile"], y=lift["mean_fwd_ret"],
+                    marker=dict(color=colors,
+                                line=dict(color="rgba(255,255,255,0.15)", width=1)),
+                    hovertemplate="decile %{x}: %{y:.3%}<extra></extra>",
+                ))
+                fig.update_layout(**_plotly_layout(
+                    height=260,
+                    xaxis=dict(title="proba decile",
+                               gridcolor="rgba(148,163,184,0.15)"),
+                    yaxis=dict(title="mean fwd 5d return",
+                               gridcolor="rgba(148,163,184,0.15)",
+                               tickformat=".1%"),
+                ))
+                st.plotly_chart(fig, width='stretch',
+                                config={"displayModeBar": False})
+            except ImportError:
+                st.bar_chart(lift.set_index("decile")[["mean_fwd_ret"]], height=240)
 
 
 # ---------- history ----------

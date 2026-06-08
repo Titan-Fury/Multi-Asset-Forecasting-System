@@ -14,9 +14,9 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 WATCHLIST_PATH = Path("data/watchlist/favorites.json")
 
@@ -87,7 +87,7 @@ def add_favorite(ticker: str, asset_class: str, display_name: str = "") -> bool:
                 "ticker": ticker,
                 "asset_class": asset_class,
                 "display_name": display_name or ticker,
-                "added_at": datetime.now(timezone.utc).isoformat(),
+                "added_at": datetime.now(UTC).isoformat(),
             })
             _write(items)
             return True
