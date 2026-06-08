@@ -23,12 +23,12 @@ import functools
 import time
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
-from omni.utils.logger import log
 from omni.orchestrator import persist as _persist
+from omni.utils.logger import log
 
 
 @dataclass
@@ -123,8 +123,8 @@ def _stage_ingest(rep: RunReport, *, run_date: str):
     # Pre-warm OI live cache for the F&O universe (best-effort, slow if
     # NSE is rate-limiting; one snapshot per ticker is enough per day).
     try:
-        from omni.ondemand.oi_live_cache import snapshot_now as _oi_snap
         from omni.ingest.sources.nse_oi import _KNOWN_FNO_SAMPLE
+        from omni.ondemand.oi_live_cache import snapshot_now as _oi_snap
         n_ok = 0
         for sym in _KNOWN_FNO_SAMPLE:
             try:
@@ -145,8 +145,8 @@ def _stage_ingest(rep: RunReport, *, run_date: str):
 def _stage_features(rep: RunReport, *, run_date: str):
     """Build per-ticker feature frames across the universe and return one
     concatenated frame for downstream stages."""
-    from omni.features.build import build_for_ticker
     from omni.features import macro as _macro
+    from omni.features.build import build_for_ticker
     from omni.utils.env import universe as _universe
 
     cfg = _universe()
@@ -250,7 +250,7 @@ def run_daily(*,
               run_date: str | None = None,
               skip_backtest: bool = False,
               skip_mount: bool = False) -> RunReport:
-    run_date = run_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_date = run_date or datetime.now(UTC).strftime("%Y-%m-%d")
     rep = RunReport(run_date=run_date)
     log.info(f"=== Omni_Stocks daily run {run_date} ===")
 

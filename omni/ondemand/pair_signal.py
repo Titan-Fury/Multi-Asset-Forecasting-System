@@ -44,7 +44,7 @@ def _bench_card_cached(bench_ticker: str, bench_asset_class: str) -> dict | None
 
 
 @cached(ttl=TTL.news, key="bench_prices:{bench_ticker}:{bench_asset_class}")
-def _cached_bench_prices(bench_ticker: str, bench_asset_class: str) -> "pd.DataFrame | None":
+def _cached_bench_prices(bench_ticker: str, bench_asset_class: str) -> pd.DataFrame | None:
     """Phase 24.16 — restored. Earlier reference at line 85 called this helper
     but it had been removed in a refactor, raising NameError per request.
     Cached benchmark price fetch so pair_signal doesn't refetch yfinance for

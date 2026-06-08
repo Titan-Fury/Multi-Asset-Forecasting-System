@@ -23,9 +23,10 @@ from __future__ import annotations
 import functools
 import inspect
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 try:
     import diskcache  # type: ignore
@@ -84,7 +85,7 @@ def cached(*, ttl: int, key: str) -> Callable:
         sig = inspect.signature(fn)
         # Per-decorated-function inflight registry. We key by the cache
         # key string so unrelated callers never block each other.
-        _inflight: dict[str, "_InflightSlot"] = {}
+        _inflight: dict[str, _InflightSlot] = {}
         _inflight_lock = threading.Lock()
 
         @functools.wraps(fn)

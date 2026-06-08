@@ -27,7 +27,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-
 _MIN_PCT = 1e-4
 
 

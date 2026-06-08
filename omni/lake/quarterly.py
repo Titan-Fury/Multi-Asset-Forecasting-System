@@ -17,14 +17,13 @@ price row gets the most recent fundamentals available AS OF that date.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
 from omni.lake import paths as lake_paths
 from omni.utils.logger import log
-
 
 _KEEP_METRICS_INCOME = {
     "Total Revenue", "Operating Revenue", "Net Income",

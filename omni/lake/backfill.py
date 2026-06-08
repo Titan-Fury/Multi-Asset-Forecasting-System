@@ -16,8 +16,8 @@ Public entry points:
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timedelta, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 
@@ -30,11 +30,11 @@ from omni.utils.logger import log
 
 
 def _today_iso() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def _today_utc() -> date:
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def _start_for(ticker: str, asset_class: str, lookback_years: int,
@@ -165,7 +165,7 @@ def backfill_universe(asset_classes: Iterable[str] | None = None, *,
         "tickers_skipped": sum(1 for s in price_stats if s["skipped"]),
         "fundamentals_rows": fund_stats.get("rows", 0),
         "asset_classes": sorted({ac for _, ac in pairs}),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
     }
     _io.update_manifest({"last_backfill": summary})
     return summary

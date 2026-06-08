@@ -56,12 +56,12 @@ except ImportError:  # pragma: no cover
 # the /health probe (we don't want to spend 6+ seconds retrying a probe
 # of a server that's clearly down).
 # --------------------------------------------------------------------------
-_session: "requests.Session | None" = None
-_probe_session: "requests.Session | None" = None
+_session: requests.Session | None = None
+_probe_session: requests.Session | None = None
 _session_lock = threading.Lock()
 
 
-def _get_session() -> "requests.Session":
+def _get_session() -> requests.Session:
     """Predict-call session: pooled + retries on transient 5xx."""
     global _session
     if _session is not None:
@@ -87,7 +87,7 @@ def _get_session() -> "requests.Session":
         return _session
 
 
-def _get_probe_session() -> "requests.Session":
+def _get_probe_session() -> requests.Session:
     """Health-probe session: pooled but NO retries. Probes fail fast so
     the dashboard doesn't spend 6+ seconds discovering the API is down."""
     global _probe_session

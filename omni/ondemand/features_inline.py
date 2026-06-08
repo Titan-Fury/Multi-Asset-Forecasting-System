@@ -15,7 +15,6 @@ import pandas as pd
 from omni.features import targets as _tgt
 from omni.features import technical as _tech
 
-
 # ----------------------------------------------------------------------
 # Phase 28 — recent-pool slice for live cross-sectional ranking.
 # Reads the most-recent ~14 trading days from training_set.parquet for
@@ -31,16 +30,16 @@ from omni.features import technical as _tech
 # weekends and India holiday clusters.
 _MAX_SLICE_AGE_DAYS = 10
 def _load_recent_pool_slice(asset_class: str, *,
-                              lookback_days: int = 14) -> "pd.DataFrame | None":
+                              lookback_days: int = 14) -> pd.DataFrame | None:
     """Return the latest `lookback_days` rows from the lake for cross-
     sectional rank parity. None when the lake is unavailable."""
     try:
-        from omni.ondemand.cache import cached, TTL  # local import: tolerate
+        from omni.ondemand.cache import TTL, cached  # local import: tolerate
         # absent diskcache backend (e.g. fresh checkout).
     except Exception:  # noqa: BLE001
         cached, TTL = None, None
 
-    def _read(asset_class: str) -> "pd.DataFrame | None":
+    def _read(asset_class: str) -> pd.DataFrame | None:
         try:
             from pathlib import Path
             p = Path("data") / "lake" / "training" / "training_set.parquet"
@@ -134,7 +133,7 @@ def _load_recent_pool_slice(asset_class: str, *,
 # network cost is amortised. Quarterly statements change ~4x/year, so a
 # 24h TTL is generous.
 # ----------------------------------------------------------------------
-def _load_quarterly_wide(asset_class: str, ticker: str) -> "pd.DataFrame | None":
+def _load_quarterly_wide(asset_class: str, ticker: str) -> pd.DataFrame | None:
     """Return wide-format quarterly fundamentals (q_* cols + asof_date)
     for one ticker, or None when unavailable. Cached to amortise the
     yfinance round-trip across rapid-fire prediction calls."""
@@ -146,10 +145,11 @@ def _load_quarterly_wide(asset_class: str, ticker: str) -> "pd.DataFrame | None"
     except Exception:  # noqa: BLE001
         cached = None
 
-    def _fetch(asset_class: str, ticker: str) -> "pd.DataFrame | None":
+    def _fetch(asset_class: str, ticker: str) -> pd.DataFrame | None:
         try:
             from omni.lake.quarterly import (
-                fetch_quarterly_fundamentals, pivot_for_join,
+                fetch_quarterly_fundamentals,
+                pivot_for_join,
             )
             long_df = fetch_quarterly_fundamentals(asset_class, ticker)
             if long_df is None or long_df.empty:

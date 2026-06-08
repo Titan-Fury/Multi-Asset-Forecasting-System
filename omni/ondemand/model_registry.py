@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
@@ -28,7 +28,6 @@ import pandas as pd
 
 from omni.utils.logger import log
 from omni.utils.paths import models_dir
-
 
 _MODEL_NAME = "universal_5d"
 _LEGACY_HORIZON = 5
@@ -114,6 +113,7 @@ _CACHE: dict[int, UniversalModel] = {}
 # invalidations under FastAPI's threadpool + Streamlit reruns. Reads
 # of an existing entry stay lockless because dict .get() is atomic.
 import threading as _mr_threading
+
 _CACHE_LOCK = _mr_threading.Lock()
 
 
@@ -197,4 +197,4 @@ def is_available() -> bool:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

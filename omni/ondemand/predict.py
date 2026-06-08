@@ -11,10 +11,9 @@ n_folds=4), then uses the LAST fold's calibrator for the live row.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
-
-import math
 
 import numpy as np
 import pandas as pd
@@ -152,8 +151,8 @@ def _align_to_universal(X_one: pd.DataFrame, um: model_registry.UniversalModel
     # haven't yet been silently masked by medians/zeros).
     try:
         from omni.features.contract import (
-            assert_contract,
             FeatureContractMismatch,
+            assert_contract,
         )
         from omni.ondemand import model_registry as _mr
         blob, _meta = _mr._paths_for(int(getattr(um, "horizon_days", 5)))
@@ -244,6 +243,7 @@ _MODEL_CACHE: dict[str, tuple[Any, ...]] = {}
 # `[mv_tag] = ...`). Reads of an existing entry stay lockless on the
 # happy path because dict lookups are atomic in CPython.
 import threading as _threading
+
 _MODEL_CACHE_LOCK = _threading.Lock()
 
 
@@ -269,8 +269,9 @@ def _cached_models(mv_tag: str):
     except Exception as e:  # noqa: BLE001
         log.warning(f"universal load skipped: {e}")
     try:
-        import joblib as _jl
         from pathlib import Path as _P
+
+        import joblib as _jl
         sp_new = _P("data") / "models" / "stack_h5.joblib"
         sp_legacy = _P("data") / "models" / "stack_h5.pkl"
         sb = None
@@ -290,8 +291,9 @@ def _cached_models(mv_tag: str):
     except Exception as e:  # noqa: BLE001
         log.warning(f"stack load skipped: {e}")
     try:
-        import joblib as _jl
         from pathlib import Path as _P
+
+        import joblib as _jl
         cp = _P("data") / "models" / "conformal_h5.joblib"
         if cp.exists():
             conformal = _jl.load(cp)
@@ -323,8 +325,9 @@ def _cached_models(mv_tag: str):
     # horizon should look up `meta_heads.get(h)`.
     meta_heads: dict[int, object] = {}
     try:
-        from omni.modeling.meta_label import load_meta as _load_meta
         from pathlib import Path as _P
+
+        from omni.modeling.meta_label import load_meta as _load_meta
         for h in (1, 5, 21):
             mp = _P("data") / "models" / f"meta_h{h}.joblib"
             if mp.exists():
@@ -520,7 +523,7 @@ def _score_one(feat_only: pd.DataFrame,
 
 
 def predict_batch(items: list[tuple[str, str]],
-                   *, max_workers: int = 8) -> list["PredictionCard | None"]:
+                   *, max_workers: int = 8) -> list[PredictionCard | None]:
     """Score multiple tickers in one pass. Loads models ONCE, runs feature
     builds in a thread pool, then scores sequentially against the warm models.
 
@@ -753,6 +756,7 @@ def _build_card(
             # uses `hasattr(_cal, "widen")` for duck typing and never
             # references the class symbol, so the import was dead.
             from pathlib import Path as _P
+
             import joblib as _jl
             _cal_path = _P("data") / "models" / "conformal_h5.joblib"
             if _cal_path.exists():
@@ -826,7 +830,8 @@ def _build_card(
     # gracefully (gates on `intraday_bar_count >= 3`).
     def _market_open_now(ac: str) -> bool:
         try:
-            from datetime import datetime, time as _time
+            from datetime import datetime
+            from datetime import time as _time
             ac_l = (ac or "").lower()
             if ac_l in ("crypto", "fx"):
                 return True  # 24/7 markets
@@ -856,8 +861,8 @@ def _build_card(
         )
     else:
         try:
-            from omni.ingest.intraday import fetch_intraday_bars
             from omni.features.intraday import compute_intraday_features
+            from omni.ingest.intraday import fetch_intraday_bars
             ibars = fetch_intraday_bars(bundle.asset_class, bundle.ticker, days=5)
             intraday_feats = compute_intraday_features(ibars, last_close)
         except Exception as exc:  # noqa: BLE001
@@ -1098,12 +1103,12 @@ def _model_version_tag() -> str:
 @cached(ttl=TTL.deep_analysis, key="predict_card:{ticker}:{asset_class}:{_mv}")
 def _predict_ticker_versioned(ticker: str, asset_class: str,
                                 *, display_name: str | None = None,
-                                _mv: str = "v0") -> "PredictionCard | None":
+                                _mv: str = "v0") -> PredictionCard | None:
     return _predict_ticker_impl(ticker, asset_class, display_name=display_name)
 
 
 def predict_ticker(ticker: str, asset_class: str,
-                    *, display_name: str | None = None) -> "PredictionCard | None":
+                    *, display_name: str | None = None) -> PredictionCard | None:
     """Cached entry point. Cache key includes the model bundle's mtime so
     predictions automatically refresh after a retrain.
     """
@@ -1114,7 +1119,7 @@ def predict_ticker(ticker: str, asset_class: str,
 
 
 def _predict_ticker_impl(ticker: str, asset_class: str,
-                           *, display_name: str | None = None) -> "PredictionCard | None":
+                           *, display_name: str | None = None) -> PredictionCard | None:
     bundle = lookup_ticker(ticker, asset_class, display_name=display_name)
     if bundle is None:
         return None
@@ -1125,8 +1130,8 @@ def _predict_ticker_impl(ticker: str, asset_class: str,
         return None
 
     # Phase 24 — single feature alignment, shared across all model paths.
-    from omni.models.xgboost_5d import _DROP_ALWAYS
     from omni.features.build import is_target_col
+    from omni.models.xgboost_5d import _DROP_ALWAYS
     last = feats.tail(1)
     feat_only = last[[c for c in last.columns
                        if c not in _DROP_ALWAYS and not is_target_col(c)]]

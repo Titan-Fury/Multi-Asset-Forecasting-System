@@ -23,13 +23,12 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
 from omni.utils.logger import log
-
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DATA = _ROOT / "data"
@@ -141,7 +140,7 @@ def persist_run(*,
                 fold_metrics: list[dict] | None = None,
                 features_latest: pd.DataFrame | None = None,
                 run_date: str | None = None) -> PersistResult:
-    run_date = run_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_date = run_date or datetime.now(UTC).strftime("%Y-%m-%d")
     paths: dict[str, str] = {}
 
     if predictions is not None and not predictions.empty:
@@ -183,7 +182,7 @@ def persist_run(*,
 
     manifest = {
         "run_date": run_date,
-        "written_at": datetime.now(timezone.utc).isoformat(),
+        "written_at": datetime.now(UTC).isoformat(),
         "paths": paths,
         "n_predictions": int(len(predictions)) if predictions is not None else 0,
         "n_signals": int(len(signals)) if signals is not None else 0,

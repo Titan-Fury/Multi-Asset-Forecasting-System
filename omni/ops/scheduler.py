@@ -28,7 +28,6 @@ import io
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 DEFAULT_TASK_NAME = "Omni_Stocks_Daily"
 DEFAULT_HOUR = 18
@@ -139,7 +138,7 @@ def install(
     *,
     hour: int = DEFAULT_HOUR,
     minute: int = DEFAULT_MINUTE,
-    bat_path: Optional[Path] = None,
+    bat_path: Path | None = None,
 ) -> tuple[bool, str]:
     """Install a daily Task Scheduler entry. Requires admin.
 
@@ -216,7 +215,7 @@ def install_weekly_retrain(
     day: str = WEEKLY_DAY,
     hour: int = WEEKLY_HOUR,
     minute: int = WEEKLY_MINUTE,
-    bat_path: Optional[Path] = None,
+    bat_path: Path | None = None,
 ) -> tuple[bool, str]:
     """Install a weekly Task Scheduler entry for retraining all horizons.
 

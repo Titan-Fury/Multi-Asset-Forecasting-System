@@ -9,6 +9,13 @@ consume directly. Never writes to the storage tier.
 """
 from __future__ import annotations
 
+# Phase 24.21 — negative cache for tickers we already proved don't resolve
+# anywhere. Keyed by (asset_class, ticker.upper()), value = monotonic-clock
+# expiry. We'd otherwise re-pay the full prices+fundamentals+news fan-out on
+# every dashboard click for a typo'd ticker, AND log "no prices for ..." each
+# time. 24h TTL is short enough that genuinely new listings still get picked
+# up the next day, long enough to suppress the warning storm we see in logs.
+import time as _time
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -19,13 +26,29 @@ from omni.ingest.fundamentals import fetch_fundamentals as _yf_fundamentals
 from omni.ingest.prices import fetch_prices as _yf_prices
 from omni.ingest.sources import (
     currents as _currents,
+)
+from omni.ingest.sources import (
     edgar as _edgar,
+)
+from omni.ingest.sources import (
     fmp as _fmp,
+)
+from omni.ingest.sources import (
     gdelt as _gdelt,
+)
+from omni.ingest.sources import (
     marketaux as _marketaux,
+)
+from omni.ingest.sources import (
     newsapi_live as _newsapi,
+)
+from omni.ingest.sources import (
     polygon as _polygon,
+)
+from omni.ingest.sources import (
     reddit_public as _reddit,
+)
+from omni.ingest.sources import (
     stocktwits as _stocktwits,
 )
 from omni.llm.backends.base import BackendError
@@ -33,16 +56,9 @@ from omni.llm.router import route as _llm_route
 from omni.ondemand.cache import TTL, cached
 from omni.ondemand.macro_live import compute_live as _macro_live
 from omni.ondemand.quality import Provenance
-from omni.ondemand.regime_live import RegimeOutput, fit_or_load as _regime_load
+from omni.ondemand.regime_live import RegimeOutput
+from omni.ondemand.regime_live import fit_or_load as _regime_load
 from omni.utils.logger import log
-
-# Phase 24.21 — negative cache for tickers we already proved don't resolve
-# anywhere. Keyed by (asset_class, ticker.upper()), value = monotonic-clock
-# expiry. We'd otherwise re-pay the full prices+fundamentals+news fan-out on
-# every dashboard click for a typo'd ticker, AND log "no prices for ..." each
-# time. 24h TTL is short enough that genuinely new listings still get picked
-# up the next day, long enough to suppress the warning storm we see in logs.
-import time as _time
 
 _NEG_TTL_SECONDS = 24 * 60 * 60
 _NEG_MAX_SIZE = 10_000  # cap to prevent unbounded growth from typo storms
@@ -54,6 +70,7 @@ _negative_cache: dict[tuple[str, str], float] = {}
 # another thread mutates concurrently. Read-only `.get()` on the
 # fast-path stays lockless because dict gets are atomic.
 import threading as _neg_threading
+
 _NEG_LOCK = _neg_threading.Lock()
 
 
@@ -243,10 +260,16 @@ def _news_combined(asset_class: str, ticker: str, display_name: str
         tasks.append(("edgar", lambda: _edgar.recent_filings(ticker, days=180)))
     if asset_class == "india":
         from omni.ingest.sources import (
-            indian_rss as _ind_rss,
             bse_notices as _bse,
-            telegram_channels as _tg,
+        )
+        from omni.ingest.sources import (
+            indian_rss as _ind_rss,
+        )
+        from omni.ingest.sources import (
             sebi_insider as _pit,
+        )
+        from omni.ingest.sources import (
+            telegram_channels as _tg,
         )
         tasks.append(("indian_rss",
                        lambda: _ind_rss.fetch_indian_news(

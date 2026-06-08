@@ -32,6 +32,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from omni.observability.metrics import metrics
+
 # Import for side effect: configures loguru + stdlib logging bridge so
 # uvicorn / FastAPI logs flow through the same pipeline.
 from omni.utils.logger import log as _omni_log  # noqa: F401
@@ -76,6 +77,7 @@ class MetricsResponse(BaseModel):
 # real source of truth; these stay only for the legacy /metrics route.
 # --------------------------------------------------------------------------
 import threading as _threading
+
 _metrics_lock = _threading.Lock()
 _metrics: dict[str, int] = {
     "requests_total": 0,

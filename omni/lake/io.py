@@ -12,13 +12,12 @@ Design choices:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
 from omni.lake import paths
 from omni.utils.logger import log
-
 
 _PRICE_COLS = ["date", "open", "high", "low", "close", "adj_close", "volume",
                 "ticker", "asset_class", "source"]
@@ -133,7 +132,7 @@ def update_manifest(updates: dict) -> dict:
             log.warning(f"manifest read failed: {e}; rebuilding")
             cur = {}
     cur.update(updates)
-    cur["updated_at"] = datetime.now(timezone.utc).isoformat()
+    cur["updated_at"] = datetime.now(UTC).isoformat()
     paths.ensure_parent(p)
     p.write_text(json.dumps(cur, indent=2, sort_keys=True), encoding="utf-8")
     return cur

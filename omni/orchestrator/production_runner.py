@@ -33,10 +33,10 @@ import random
 import signal
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 from omni.orchestrator import daily as _daily
 
@@ -46,6 +46,7 @@ _log = logging.getLogger("omni.orchestrator.production")
 # Configuration knobs (env-overridable)
 # --------------------------------------------------------------------------
 import os
+
 DLQ_PATH = Path(os.environ.get(
     "OMNI_DLQ_PATH", "data/orchestrator/dead_letter.jsonl"))
 MANIFEST_DIR = Path(os.environ.get(
@@ -242,7 +243,7 @@ def run_with_retries(
     per-ticker DLQ entries, add `write_dlq()` calls inside the relevant
     feature/predict loops in `daily.py`.
     """
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     rep = ProductionReport(
         base={},
         started_at=started.isoformat(),
@@ -253,7 +254,7 @@ def run_with_retries(
         retries_by_stage["run_daily"] = attempt
         # Write a DLQ entry for any non-final attempt failure
         write_dlq(DLQEntry(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             run_date=run_date or started.strftime("%Y-%m-%d"),
             stage="run_daily",
             item="orchestrator",
@@ -277,7 +278,7 @@ def run_with_retries(
         _log.error(f"run_daily exhausted retries: {e}", exc_info=True)
         rep.base = {"ok": False, "error": str(e)}
 
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
     rep.finished_at = finished.isoformat()
     rep.total_seconds = (finished - started).total_seconds()
     rep.retries_by_stage = retries_by_stage

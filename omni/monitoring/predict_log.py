@@ -21,14 +21,13 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
 from omni.lake import paths as _lake_paths
 from omni.utils.logger import log
-
 
 _SCHEMA_COLS = [
     "logged_at", "ticker", "asset_class", "asof",
@@ -66,7 +65,7 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
         # dict if present (gracefully None for older cards).
         pillars = card.get("pillars") or {}
         row = {
-            "logged_at": datetime.now(timezone.utc).isoformat(),
+            "logged_at": datetime.now(UTC).isoformat(),
             "ticker": str(card.get("ticker", "")),
             "asset_class": str(card.get("asset_class", "")),
             "asof": str(card.get("asof", ""))[:19],
@@ -94,7 +93,7 @@ def log_prediction(card: dict, *, horizon_days: int = 5) -> bool:
             "earnings_momentum_score": float(pillars["earnings_momentum"]) if "earnings_momentum" in pillars else None,
             "rubric_total": float(card.get("rubric_total", 0.0)) if card.get("rubric_total") is not None else None,
         }
-        date_iso = datetime.now(timezone.utc).date().isoformat()
+        date_iso = datetime.now(UTC).date().isoformat()
         path = _lake_paths.predictions_path(date_iso)
         _lake_paths.ensure_parent(path)
         # Phase 28.4 — append-only JSONL fast path. The legacy

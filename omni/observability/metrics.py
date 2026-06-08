@@ -51,13 +51,19 @@ _log = logging.getLogger("omni.observability")
 # nothing ever crashes; you just don't get the /metrics endpoint payload.
 # --------------------------------------------------------------------------
 try:
-    from prometheus_client import (  # type: ignore
-        Counter as _PromCounter,
-        Histogram as _PromHistogram,
-        Gauge as _PromGauge,
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
         CollectorRegistry,
         generate_latest,
-        CONTENT_TYPE_LATEST,
+    )
+    from prometheus_client import (  # type: ignore
+        Counter as _PromCounter,
+    )
+    from prometheus_client import (
+        Gauge as _PromGauge,
+    )
+    from prometheus_client import (
+        Histogram as _PromHistogram,
     )
     _HAS_PROMETHEUS = True
     _registry = CollectorRegistry()

@@ -27,9 +27,8 @@ from dataclasses import dataclass
 
 import requests
 
-from omni.ingest.sources.nse_flows import _nse_session, _HEADERS_API
+from omni.ingest.sources.nse_flows import _HEADERS_API, _nse_session
 from omni.utils.logger import log
-
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -55,6 +54,7 @@ _CACHE_TTL = 30.0
 # reader between `.clear()` and the new write sees an empty cache
 # and triggers a duplicate fan-out to Yahoo / NSE / Coingecko.
 import threading as _search_threading
+
 _CACHE_LOCK = _search_threading.Lock()
 
 

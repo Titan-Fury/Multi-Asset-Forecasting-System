@@ -275,10 +275,10 @@ def resolve(query: str) -> Resolution | None:
         t, ac, name = _ALIAS[qn]
         return Resolution(t, ac, name, confident=False)
 
-    for t, ac, name, t_low, name_low in _LOOKUP:
+    for t, ac, name, t_low, _name_low in _LOOKUP:
         if t_low == ql:
             return Resolution(t, ac, name, confident=True)
-    for t, ac, name, t_low, name_low in _LOOKUP:
+    for t, ac, name, _t_low, name_low in _LOOKUP:
         if name_low == ql:
             return Resolution(t, ac, name, confident=True)
     for t, ac, name, _, _ in _LOOKUP:

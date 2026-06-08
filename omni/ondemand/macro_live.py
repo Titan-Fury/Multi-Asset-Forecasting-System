@@ -24,7 +24,6 @@ from omni.ingest.sources import fred_live
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
 
-
 _FRED_IDS = ["DGS10", "DGS2", "VIXCLS", "DCOILWTICO", "CPIAUCSL", "UNRATE"]
 _YF_MACRO = {"vix": "^VIX", "dxy": "DX-Y.NYB", "us10y": "^TNX",
              "gold": "GC=F", "oil": "CL=F"}
