@@ -22,10 +22,9 @@ import re
 
 import pandas as pd
 
-from omni.llm.router import route
 from omni.llm.backends.base import BackendError
+from omni.llm.router import route
 from omni.utils.logger import log
-
 
 # Phase 24.18 — keyword groups for "narrative" features. These are matched
 # case-insensitively against title+description text. The counts are

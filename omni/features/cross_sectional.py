@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-
 _RANK_COLS = (
     "ret_20d",                                # momentum
     "ret_60d",                                # momentum (60d, Phase 28.4)

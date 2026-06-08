@@ -35,7 +35,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 _DEFAULT_BAND_TIERS = (0.045, 0.095, 0.195)  # 5%, 10%, 20% bands +/- a tolerance
 _RANGE_TOLERANCE = 0.005                     # locked bar has range/open <= 0.5%
 

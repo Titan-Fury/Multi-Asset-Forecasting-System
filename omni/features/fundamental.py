@@ -49,7 +49,7 @@ def compute(snapshots: pd.DataFrame) -> pd.DataFrame:
 
     # Winsorize within (asset_class, run_date) before z-scoring
     out_chunks = []
-    for (ac, rd), grp in df.groupby(["asset_class", "run_date"], dropna=False):
+    for (_ac, _rd), grp in df.groupby(["asset_class", "run_date"], dropna=False):
         g = grp.copy()
         for c in _NUMERIC + ["log_market_cap", "earnings_yield"]:
             if c not in g.columns:

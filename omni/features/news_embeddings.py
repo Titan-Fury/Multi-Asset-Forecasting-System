@@ -21,13 +21,14 @@ Graceful degradation:
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
-from omni.llm.embed_nemotron import embed as nemotron_embed, EMBED_DIM
+from omni.llm.embed_nemotron import EMBED_DIM
+from omni.llm.embed_nemotron import embed as nemotron_embed
 
 EMB_OUT_DIM = 32
 EMB_CACHE_DIR = Path("data") / "cache" / "news_embed"
@@ -118,8 +119,8 @@ def embed_daily_news(news_raw: pd.DataFrame,
 
 def fit_pca(corpus_vecs: np.ndarray, n: int = EMB_OUT_DIM):
     """Fit a PCA on raw 1024-d vectors. Saves to PCA_PATH."""
-    from sklearn.decomposition import PCA
     import joblib
+    from sklearn.decomposition import PCA
     if corpus_vecs.shape[0] < n:
         # Not enough samples — return identity projection
         return None

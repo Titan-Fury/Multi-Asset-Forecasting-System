@@ -37,8 +37,8 @@ bull/chop, -1 if total<=30 in bear/crisis, else 0 (handled by gate later).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -51,8 +51,8 @@ from omni.utils.logger import log
 # referencing it per row is O(1), but the import statement itself is
 # not (sys.modules dict lookup runs on every call).
 try:
-    from omni.rubric.learned import load_learned_weights as _load_learned_weights
     from omni.rubric.learned import blend_weights as _blend_weights
+    from omni.rubric.learned import load_learned_weights as _load_learned_weights
 except Exception:  # noqa: BLE001
     _load_learned_weights = None  # type: ignore
     _blend_weights = None  # type: ignore

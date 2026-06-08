@@ -14,7 +14,6 @@ import yaml
 
 from omni.utils.logger import log
 
-
 _BENCH_CFG: dict | None = None
 
 

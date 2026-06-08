@@ -35,7 +35,6 @@ import pandas as pd
 from omni.utils.logger import log
 from omni.utils.paths import local_data_root
 
-
 _PILLAR_COLS = (
     "technical_score", "fundamental_score", "sentiment_score",
     "macro_score", "microstructure_score", "oi_score",

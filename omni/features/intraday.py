@@ -11,7 +11,6 @@ import math
 import numpy as np
 import pandas as pd
 
-
 _KEYS = (
     "intraday_return_pct",
     "gap_open_pct",

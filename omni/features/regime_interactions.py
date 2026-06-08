@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-
 _INTERACT_COLS = (
     "rsi_14", "macd_hist_pct", "vol_ratio", "ret_20d",
     "mom_vol_adj_20d", "sent_mean", "sent_z_30d",

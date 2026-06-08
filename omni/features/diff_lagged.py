@@ -46,11 +46,10 @@ Idempotent — adds columns; doesn't overwrite an existing populated value.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
-
 
 _DIFF_COLS = ("delta_close_5d", "delta_close_20d",
               "delta_atr_5d", "delta_rsi_5d")
