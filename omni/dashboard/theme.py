@@ -1140,7 +1140,7 @@ _VT_AND_CMDK_JS = """
             var s = new Set();
             document.querySelectorAll('table td, .pill, [data-testid="stMetricValue"]').forEach(function (e) {
                 var t = (e.textContent || '').trim();
-                if (/^[A-Z][A-Z0-9.\-]{1,12}$/.test(t)) s.add(t);
+                if (/^[A-Z][A-Z0-9.\\-]{1,12}$/.test(t)) s.add(t);
             });
             return Array.from(s);
         }

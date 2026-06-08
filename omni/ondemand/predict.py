@@ -749,7 +749,7 @@ def _build_card(
         if _cal is None:
             # Phase 28.4 fix-up — drop the now-unused
             # `from omni.models.conformal import ConformalIntervalCalibrator`
-            # type hint that was carried as `# noqa: F401`. The new path
+            # type hint that was carried as a noqa-F401 import. The new path
             # uses `hasattr(_cal, "widen")` for duck typing and never
             # references the class symbol, so the import was dead.
             from pathlib import Path as _P

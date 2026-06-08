@@ -98,7 +98,7 @@ def main() -> int:
         i1, i2 = int(n * 0.6), int(n * 0.8)
         tr, ca, te = sub.iloc[:i1], sub.iloc[i1:i2], sub.iloc[i2:]
 
-        def _xy(part):
+        def _xy(part, feats=feats):
             X = part[feats].apply(pd.to_numeric, errors="coerce")
             X = X.replace([np.inf, -np.inf], np.nan).fillna(0).clip(-1e9, 1e9).values
             y = part["_y_bin"].astype(int).values

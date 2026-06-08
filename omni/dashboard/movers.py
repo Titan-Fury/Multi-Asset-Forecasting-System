@@ -47,7 +47,7 @@ def _returns_panel(scope: str = "india") -> pd.DataFrame:
             close = float(last["close"])
             vol = float(last.get("volume", 0) or 0)
 
-            def _ret(n: int) -> float:
+            def _ret(n: int, df=df, close=close) -> float:
                 if len(df) <= n:
                     return float("nan")
                 prev = float(df.iloc[-(n + 1)]["close"])
