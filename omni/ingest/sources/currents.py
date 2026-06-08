@@ -16,7 +16,7 @@ Schema mirrors the news-union contract used by lookup._news_combined:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import requests
@@ -51,7 +51,7 @@ def news(ticker: str, display_name: str | None = None,
         return pd.DataFrame(columns=_COLS)
 
     q = display_name or ticker
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     # Hard-cap at 15 days (free-tier limit); allow caller to ask for less.
     lookback = max(1, min(int(lookback_days), 15))
     start = end - timedelta(days=lookback)
@@ -93,8 +93,10 @@ def news(ticker: str, display_name: str | None = None,
         # convention.
         try:
             from urllib.parse import urlparse
-            host = urlparse(url).netloc
-            domain = host.lower().lstrip("www.") if host else "currents"
+            host = urlparse(url).netloc.lower()
+            # strip a leading "www." PREFIX (lstrip would wrongly remove any
+            # leading w/. characters, e.g. "wallst.com" -> "allst.com").
+            domain = host[4:] if host.startswith("www.") else (host or "currents")
         except Exception:  # noqa: BLE001
             domain = "currents"
         rows.append({
