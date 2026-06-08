@@ -1,0 +1,32 @@
+name: lint-and-security
+
+# Fast quality gate: ruff (style + bug patterns) and bandit (security).
+# Runs on every push and PR. Kept dependency-light on purpose — it installs
+# only the linters, not the heavy ML stack (torch/xgboost/transformers), so it
+# completes in seconds.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linters
+        run: python -m pip install --upgrade pip ruff bandit
+
+      - name: Ruff (style + bug patterns)
+        run: ruff check omni scripts
+
+      - name: Bandit (security — medium+high)
+        run: bandit -c pyproject.toml -r omni scripts -ll
