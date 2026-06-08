@@ -6,7 +6,7 @@ Dedup key: (series_id, date).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -39,7 +39,7 @@ def _fetch_series(series_id: str, *, start: str, end: str) -> pd.DataFrame:
 def ingest_fred(*, lookback_years: int = 8) -> dict[str, int]:
     cfg = sources()
     series_ids = cfg.get("macro", {}).get("fred", {}).get("series", [])
-    end_dt = datetime.now(timezone.utc).date()
+    end_dt = datetime.now(UTC).date()
     start_dt = end_dt - timedelta(days=int(lookback_years * 365.25))
 
     counts: dict[str, int] = {}

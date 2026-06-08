@@ -9,14 +9,13 @@ URL: https://www.bseindia.com/data/xml/notices.xml
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import requests
 
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
-
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -59,7 +58,7 @@ def notices() -> pd.DataFrame:
             out.append({
                 "title": title, "url": link, "source": "bse_notices",
                 "published_at": (ts.isoformat() if ts is not None and pd.notna(ts)
-                                  else datetime.now(timezone.utc).isoformat()),
+                                  else datetime.now(UTC).isoformat()),
                 "sent_score": 0.0,
             })
         if not out:

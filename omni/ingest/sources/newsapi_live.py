@@ -7,7 +7,7 @@ Schema:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import requests
@@ -30,7 +30,7 @@ def news(ticker: str, display_name: str | None = None,
         return pd.DataFrame(columns=_COLS)
 
     q = display_name or ticker
-    since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    since = (datetime.now(UTC) - timedelta(days=lookback_days)).isoformat()
     try:
         r = requests.get(
             "https://newsapi.org/v2/everything",

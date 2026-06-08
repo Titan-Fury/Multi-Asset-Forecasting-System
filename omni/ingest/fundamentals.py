@@ -12,7 +12,7 @@ defensively .get() everything and store NaN for missing fields.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -63,7 +63,7 @@ def _fetch_one(asset_class: str, ticker: str) -> dict:
             if has_bo:
                 info = info_bo
     row: dict[str, object] = {
-        "run_date": datetime.now(timezone.utc).date().isoformat(),
+        "run_date": datetime.now(UTC).date().isoformat(),
         "ticker": ticker,
         "asset_class": asset_class,
         "source": "yfinance",

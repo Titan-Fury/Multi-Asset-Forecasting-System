@@ -10,7 +10,7 @@ Schema:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import requests
@@ -36,7 +36,7 @@ def news(ticker: str, *, asset_class: str = "us", lookback_days: int = 3,
 
     sym = (ticker if asset_class == "us" or "." in ticker or ticker.startswith("^")
            else f"{ticker}.NS")
-    since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M")
+    since = (datetime.now(UTC) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M")
     try:
         r = requests.get(
             "https://api.marketaux.com/v1/news/all",

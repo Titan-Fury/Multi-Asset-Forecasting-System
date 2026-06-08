@@ -31,7 +31,6 @@ import requests
 from omni.ondemand.cache import cached
 from omni.utils.logger import log
 
-
 _UA = os.environ.get("CBOE_USER_AGENT",
                       "Omni_Stocks research-noreply@example.com")
 _HEADERS = {"User-Agent": _UA, "Accept": "application/json"}

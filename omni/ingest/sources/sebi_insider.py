@@ -17,11 +17,11 @@ Cached at TTL.news (30 min).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
-from omni.ingest.sources.nse_flows import _nse_session, _HEADERS_API
+from omni.ingest.sources.nse_flows import _HEADERS_API, _nse_session
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
 
@@ -35,7 +35,7 @@ def insider_disclosures(days: int = 30) -> pd.DataFrame:
     """Recent SEBI PIT-2015 insider disclosures across the NSE listed universe."""
     s = _nse_session()
     s.headers.update(_HEADERS_API)
-    end = datetime.now(timezone.utc).date()
+    end = datetime.now(UTC).date()
     start = end - timedelta(days=days)
     url = (f"https://www.nseindia.com/api/corporates-pit?"
             f"index=equities&from_date={_format(start)}&to_date={_format(end)}")

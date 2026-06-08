@@ -31,10 +31,9 @@ import time
 
 import requests
 
-from omni.ingest.sources.nse_flows import _nse_session, _HEADERS_API
+from omni.ingest.sources.nse_flows import _HEADERS_API, _nse_session
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
-
 
 # Symbols known to have F&O. If any of these comes back empty we know
 # the endpoint is broken (vs the symbol just being non-FNO). Used to

@@ -17,9 +17,9 @@ we handle that quietly. Cached at TTL.fundamentals (24h) per date.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime
 from io import StringIO
-from typing import Iterable
 
 import pandas as pd
 import requests

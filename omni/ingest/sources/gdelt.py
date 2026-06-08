@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import requests
@@ -54,7 +54,7 @@ def news(ticker: str, display_name: str | None = None,
         q_terms.append(f'"{display_name}"')
     q = " OR ".join(q_terms)
 
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=lookback_days)
     params = {
         "query": f"{q} sourcelang:eng",

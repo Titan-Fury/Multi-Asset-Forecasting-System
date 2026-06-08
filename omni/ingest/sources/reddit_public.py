@@ -23,7 +23,6 @@ import requests
 from omni.ondemand.cache import cached
 from omni.utils.logger import log
 
-
 _UA = os.environ.get(
     "REDDIT_USER_AGENT",
     "Omni_Stocks/0.1 research-only (contact: research-noreply@example.com)",

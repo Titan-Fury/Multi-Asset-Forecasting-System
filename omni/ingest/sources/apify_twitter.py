@@ -38,8 +38,8 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
@@ -102,7 +102,7 @@ def _build_search_terms(tickers: Iterable[str], *,
     so the actor itself filters by recency rather than us paying for
     older tweets we'd discard later.
     """
-    since = (datetime.now(timezone.utc) - timedelta(hours=int(lookback_hours))
+    since = (datetime.now(UTC) - timedelta(hours=int(lookback_hours))
              ).strftime("%Y-%m-%d")
     terms: list[str] = []
     for t in tickers:

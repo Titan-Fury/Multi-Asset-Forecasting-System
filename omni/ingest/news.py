@@ -19,8 +19,8 @@ Phase 24.18:
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import requests
@@ -39,7 +39,7 @@ def _fetch_newsapi(query: str, *, lookback_days: int = 1, page_size: int = 100) 
     if not api_key:
         log.warning("NEWSAPI_KEY not set; skipping NewsAPI")
         return pd.DataFrame(columns=_NEWS_COLS)
-    since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+    since = (datetime.now(UTC) - timedelta(days=lookback_days)).isoformat()
     r = requests.get(
         "https://newsapi.org/v2/everything",
         params={
@@ -179,6 +179,7 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
     if cfg.get("news", {}).get("gdelt", {}).get("enabled", True):
         try:
             import time as _time
+
             from omni.ingest.sources import gdelt as _gdelt
             # Phase 24.20 — throttle GDelt to avoid 429 storms. The DOC API
             # rate-limits unauthenticated callers aggressively; ~5s between
@@ -263,7 +264,7 @@ def ingest_news_for_tickers(tickers: Iterable[str], *,
 
 
 def _today_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _india_universe() -> list[str]:

@@ -13,13 +13,12 @@ where vwap is the cumulative session VWAP recomputed within each trading day.
 """
 from __future__ import annotations
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from omni.ingest.prices import _yf_symbol
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
-
 
 _COLS = ["ts", "open", "high", "low", "close", "volume", "vwap"]
 

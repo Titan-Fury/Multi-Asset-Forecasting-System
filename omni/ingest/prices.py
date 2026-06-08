@@ -12,7 +12,7 @@ Dedup key: (ticker, date).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -213,7 +213,7 @@ def latest_intraday(asset_class: str, ticker: str) -> dict:
 def ingest_universe(*, lookback_years: int | None = None, end: str | None = None) -> dict[str, int]:
     """Ingest prices for the entire configured universe and persist via tiers.save_raw."""
     cfg = universe()
-    end_dt = datetime.now(timezone.utc).date() if end is None else pd.Timestamp(end).date()
+    end_dt = datetime.now(UTC).date() if end is None else pd.Timestamp(end).date()
     years = lookback_years or cfg.get("lookback_years", 8)
     start_dt = end_dt - timedelta(days=int(years * 365.25))
     start, end = start_dt.isoformat(), end_dt.isoformat()
@@ -241,7 +241,7 @@ def ingest_universe(*, lookback_years: int | None = None, end: str | None = None
 def ingest_macro(*, lookback_years: int | None = None) -> dict[str, int]:
     """Ingest macro reference series from yfinance."""
     cfg = universe()
-    end_dt = datetime.now(timezone.utc).date()
+    end_dt = datetime.now(UTC).date()
     years = lookback_years or cfg.get("lookback_years", 8)
     start_dt = end_dt - timedelta(days=int(years * 365.25))
 

@@ -21,17 +21,16 @@ from __future__ import annotations
 
 import os
 import re
+
 # defusedxml hardens parsing of untrusted remote XML (Form 4 filings) against
 # entity-expansion / XXE attacks. It is a declared dependency, so we require it
 # rather than falling back to the vulnerable stdlib parser.
 import defusedxml.ElementTree as _ET
-
 import pandas as pd
 import requests
 
 from omni.ondemand.cache import cached, get_cache
 from omni.utils.logger import log
-
 
 _UA = os.environ.get("SEC_USER_AGENT", "Omni_Stocks research-noreply@example.com")
 _HEADERS = {"User-Agent": _UA, "Accept-Encoding": "gzip, deflate"}

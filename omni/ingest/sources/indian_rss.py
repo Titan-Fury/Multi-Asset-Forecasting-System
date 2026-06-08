@@ -18,14 +18,13 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import requests
 
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
-
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -108,7 +107,7 @@ def _parse_rss(xml: str, source: str) -> list[dict]:
             "url": link,
             "source": source,
             "published_at": (ts.isoformat() if ts is not None and pd.notna(ts)
-                              else datetime.now(timezone.utc).isoformat()),
+                              else datetime.now(UTC).isoformat()),
             "summary": _strip_html(desc_m.group(1)) if desc_m else "",
             "sent_score": 0.0,
         })

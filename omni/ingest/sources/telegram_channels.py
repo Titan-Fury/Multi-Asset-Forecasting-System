@@ -21,7 +21,7 @@ Output schema: [title, url, source, published_at, sent_score].
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import requests
@@ -29,7 +29,6 @@ import requests
 from omni.ingest.sources.indian_rss import _strip_html
 from omni.ondemand.cache import TTL, cached
 from omni.utils.logger import log
-
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -70,7 +69,7 @@ def _parse_channel(html: str, channel: str) -> list[dict]:
             "url": f"https://t.me/{channel}",
             "source": f"telegram_{channel}",
             "published_at": (ts.isoformat() if ts is not None and pd.notna(ts)
-                              else datetime.now(timezone.utc).isoformat()),
+                              else datetime.now(UTC).isoformat()),
             "sent_score": 0.0,
         })
     return out

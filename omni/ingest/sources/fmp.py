@@ -8,7 +8,7 @@ Returns the same 15-field schema as omni.ingest.fundamentals.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import requests
@@ -42,7 +42,7 @@ def fundamentals(ticker: str, asset_class: str = "us") -> pd.DataFrame:
         return pd.DataFrame()
 
     row: dict[str, object] = {
-        "run_date": datetime.now(timezone.utc).date().isoformat(),
+        "run_date": datetime.now(UTC).date().isoformat(),
         "ticker": ticker, "asset_class": asset_class, "source": "fmp",
     }
     try:
