@@ -104,7 +104,7 @@ class PatchTSTBinaryClassifier:
         tickers=None,
         closes=None,
         **_: Any,
-    ) -> "PatchTSTBinaryClassifier":
+    ) -> PatchTSTBinaryClassifier:
         if not _PATCHTST_AVAILABLE:
             raise RuntimeError("neuralforecast.PatchTST not installed")
         if dates is None or tickers is None or closes is None:

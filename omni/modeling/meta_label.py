@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import joblib
 import numpy as np
@@ -115,7 +114,7 @@ def save_meta(model, result: MetaResult, path: Path | str) -> None:
     joblib.dump({"model": model, "result": result}, path)
 
 
-def load_meta(path: Path | str) -> Optional[tuple]:
+def load_meta(path: Path | str) -> tuple | None:
     path = Path(path)
     if not path.exists():
         return None

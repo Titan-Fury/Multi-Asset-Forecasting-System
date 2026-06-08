@@ -111,8 +111,9 @@ class StackResult:
 
 
 def _new_xgb():
-    import xgboost as xgb
     import os
+
+    import xgboost as xgb
     # Phase 24.22 — same hyperparameter overhaul as xgboost_5d:
     # - learning_rate 0.05 -> 0.03 with n_estimators 400 -> 800
     # - min_child_weight 1 -> 5, reg_alpha 0 -> 0.5
@@ -166,7 +167,7 @@ def _new_cb():
 def _new_nhits(horizon_days: int = 5):
     if nf is None:
         return None
-    from omni.models.nhits import NHiTSBinaryClassifier, _NF_AVAILABLE
+    from omni.models.nhits import _NF_AVAILABLE, NHiTSBinaryClassifier
     if not _NF_AVAILABLE:
         return None
     return NHiTSBinaryClassifier(
@@ -184,7 +185,7 @@ def _new_patchtst(horizon_days: int = 5):
     if nf is None:
         return None
     try:
-        from omni.models.patchtst import PatchTSTBinaryClassifier, _PATCHTST_AVAILABLE
+        from omni.models.patchtst import _PATCHTST_AVAILABLE, PatchTSTBinaryClassifier
     except ImportError:
         return None
     if not _PATCHTST_AVAILABLE:

@@ -78,7 +78,7 @@ class GateConfig:
     min_conviction_overrides: dict | None = None
 
     @classmethod
-    def from_yaml(cls) -> "GateConfig":
+    def from_yaml(cls) -> GateConfig:
         cfg = _load_rubric().get("gating", {})
         return cls(
             min_conviction=float(cfg.get("min_conviction", 70.0)),

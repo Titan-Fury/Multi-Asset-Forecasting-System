@@ -29,7 +29,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-
 # Per-state model weight when blending. Values < 0.5 tilt toward the rubric.
 # Used for both hard-state lookup and probability-weighted soft mixing.
 _REGIME_MODEL_WEIGHT = {

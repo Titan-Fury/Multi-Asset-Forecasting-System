@@ -21,7 +21,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 _KEYS = ["n_trades", "n_long", "n_short", "ann_return", "ann_vol", "sharpe",
          "sortino", "max_drawdown", "turnover", "hit_rate", "profit_factor",
          "avg_trade_ret", "avg_open_positions", "n_periods"]

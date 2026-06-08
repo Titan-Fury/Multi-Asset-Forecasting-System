@@ -108,7 +108,7 @@ class NHiTSBinaryClassifier:
         tickers=None,
         closes=None,
         **_: Any,
-    ) -> "NHiTSBinaryClassifier":
+    ) -> NHiTSBinaryClassifier:
         if not _NF_AVAILABLE:
             raise RuntimeError("neuralforecast not installed")
         if dates is None or tickers is None or closes is None:

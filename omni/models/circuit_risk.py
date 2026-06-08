@@ -31,7 +31,6 @@ import pandas as pd
 from omni.cv.purged_kfold import purged_kfold_indices
 from omni.utils.logger import log
 
-
 # Features are price + microstructure + (optional) narrative sentiment.
 # All ticker-invariant by Phase 24.17 normalization. The order here is
 # also the inference-time alignment order — keep stable.

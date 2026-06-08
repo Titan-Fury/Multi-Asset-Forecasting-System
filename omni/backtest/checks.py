@@ -89,7 +89,7 @@ def shuffled_baseline(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     shuffled = df.copy()
     shuffled[target] = rng.permutation(shuffled[target].values)
     preds = walkforward_fn(shuffled)
-    from omni.backtest.metrics import hit_rate, auc, brier
+    from omni.backtest.metrics import auc, brier, hit_rate
     out = {
         "hit_rate": hit_rate(preds),
         "auc": auc(preds),

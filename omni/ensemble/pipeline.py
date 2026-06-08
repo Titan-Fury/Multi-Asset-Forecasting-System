@@ -16,7 +16,8 @@ from __future__ import annotations
 import pandas as pd
 
 from omni.ensemble.combine import BlendConfig, blend
-from omni.ensemble.gate import GateConfig, apply as gate_apply
+from omni.ensemble.gate import GateConfig
+from omni.ensemble.gate import apply as gate_apply
 from omni.regime.hmm import RegimeModel
 from omni.rubric.scorer import score_frame as rubric_score_frame
 from omni.utils.logger import log

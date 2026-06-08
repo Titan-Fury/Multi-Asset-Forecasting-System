@@ -38,7 +38,6 @@ from __future__ import annotations
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-
 _EPS = 1e-12
 
 
@@ -51,7 +50,7 @@ class BetaCalibrator:
         self.c: float = 0.0
         self._fitted: bool = False
 
-    def fit(self, scores: np.ndarray, y: np.ndarray) -> "BetaCalibrator":
+    def fit(self, scores: np.ndarray, y: np.ndarray) -> BetaCalibrator:
         s = np.clip(np.asarray(scores, dtype=float).ravel(), _EPS, 1.0 - _EPS)
         y = np.asarray(y, dtype=int).ravel()
         if s.shape != y.shape:

@@ -18,9 +18,9 @@ is the cue for cron to schedule an emergency retrain.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -77,7 +77,7 @@ def update_from_predictions(preds_df: pd.DataFrame,
             b = _brier(p, y)
             if mon.update(b):
                 drifted = True
-                mon.last_drift = datetime.now(tz=timezone.utc).isoformat()
+                mon.last_drift = datetime.now(tz=UTC).isoformat()
         mon.save()
         if drifted:
             any_drift = True
@@ -92,7 +92,7 @@ def update_from_predictions(preds_df: pd.DataFrame,
     _FLAG.write_text(json.dumps({
         "any_drift": any_drift,
         "per_scope": out,
-        "checked_at": datetime.now(tz=timezone.utc).isoformat(),
+        "checked_at": datetime.now(tz=UTC).isoformat(),
     }, indent=2))
     return out
 

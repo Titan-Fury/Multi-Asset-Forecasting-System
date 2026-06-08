@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 try:
     from river.drift import ADWIN
@@ -56,7 +55,7 @@ class DriftMonitor:
     delta: float = 0.002
     detector: object = field(default=None, init=False, repr=False)
     n_seen: int = 0
-    last_drift: Optional[str] = None
+    last_drift: str | None = None
 
     def __post_init__(self):
         if HAS_RIVER:
@@ -95,7 +94,7 @@ class DriftMonitor:
         }))
 
     @classmethod
-    def load(cls, scope: str, *, delta: float = 0.002) -> "DriftMonitor":
+    def load(cls, scope: str, *, delta: float = 0.002) -> DriftMonitor:
         path = STATE_DIR / f"{scope}.json"
         if not path.exists():
             return cls(scope=scope, delta=delta)

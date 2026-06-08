@@ -31,7 +31,6 @@ import pandas as pd
 
 from omni.utils.logger import log
 
-
 _REGIME_LABELS = ("bull", "chop", "bear", "crisis")
 
 
@@ -93,7 +92,7 @@ class RegimeStackBundle:
         return {lbl: 1.0 / n for lbl in self.stacks.keys()}
 
     @staticmethod
-    def save(bundle: "RegimeStackBundle", path: str | Path) -> Path:
+    def save(bundle: RegimeStackBundle, path: str | Path) -> Path:
         import joblib
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +102,7 @@ class RegimeStackBundle:
         return p
 
     @staticmethod
-    def load(path: str | Path) -> "RegimeStackBundle | None":
+    def load(path: str | Path) -> RegimeStackBundle | None:
         import joblib
         p = Path(path)
         if not p.exists():

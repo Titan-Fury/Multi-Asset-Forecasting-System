@@ -20,8 +20,8 @@ Public API:
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -208,8 +208,8 @@ def walkforward_fit(df: pd.DataFrame, *, target: str = "fwd_dir_5d",
     the prepare_xy NaN-drop; alignment to X.index happens internally.
     """
     try:
-        from xgboost import XGBClassifier
         from sklearn.calibration import CalibratedClassifierCV
+        from xgboost import XGBClassifier
     except ImportError as e:
         raise RuntimeError("xgboost / scikit-learn missing from env") from e
 
