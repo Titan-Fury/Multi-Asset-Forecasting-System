@@ -2211,9 +2211,17 @@ def main() -> None:
     # Phase 24.2 — live market data marquee at the very top.
     # Cached for 5 minutes via st.cache_data inside the module; falls back
     # gracefully to "—" tiles if yfinance is unreachable.
+    # Phase 28.19 — rendered inside an auto-refreshing fragment (st.fragment,
+    # Streamlit >=1.37) so the live strip refreshes itself every 5 min WITHOUT
+    # a full-page rerun. run_every is aligned to the 300s marquee data cache.
     try:
         from omni.dashboard.marquee import render_marquee
-        render_marquee(height_px=36)
+
+        @st.fragment(run_every="300s")
+        def _marquee_fragment():
+            render_marquee(height_px=36)
+
+        _marquee_fragment()
     except Exception:  # noqa: BLE001
         _log.warning("marquee render failed", exc_info=True)
 
