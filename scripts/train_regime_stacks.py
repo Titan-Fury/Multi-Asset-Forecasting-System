@@ -33,7 +33,6 @@ from omni.models.stack import fit_stack
 from omni.models.xgboost_5d import _DROP_ALWAYS
 from omni.utils.logger import log
 
-
 REGIME_PARQUET = Path("data/regime/latest.parquet")
 
 
@@ -67,7 +66,7 @@ def main() -> int:
                     help="skip regimes with fewer than this many training rows")
     args = p.parse_args()
 
-    print(f"[1/4] loading training set + regime labels")
+    print("[1/4] loading training set + regime labels")
     df = _load_training()
     rg = _load_regimes()
     df = df.merge(rg, on="date", how="left")
@@ -86,7 +85,7 @@ def main() -> int:
     df["_y"] = (df[target].astype(int) > 0).astype(int)
 
     print(f"  rows after merge/dropna: {len(df):,}")
-    print(f"  regime distribution:")
+    print("  regime distribution:")
     for lbl, n in df["regime"].value_counts().items():
         print(f"    {lbl:<8s} {n:>8,}")
 
@@ -127,7 +126,7 @@ def main() -> int:
         print("ERROR: no per-regime stacks trained")
         return 1
 
-    print(f"[3/4] assembling bundle")
+    print("[3/4] assembling bundle")
     bundle = _rs.RegimeStackBundle(
         stacks=stacks,
         feature_cols=feat_cols,
@@ -139,7 +138,7 @@ def main() -> int:
     out_path = _rs.default_path(args.horizon)
     _rs.RegimeStackBundle.save(bundle, out_path)
 
-    print(f"[4/4] done.")
+    print("[4/4] done.")
     print(f"  saved -> {out_path}")
     print(f"  oof_aucs: {aucs}")
     return 0

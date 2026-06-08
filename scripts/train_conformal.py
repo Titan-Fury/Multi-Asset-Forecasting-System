@@ -24,12 +24,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from omni.utils.logger import log
 from omni.models.conformal import (
     ConformalIntervalCalibrator,
     fit_interval_calibrator,
 )
 from omni.ondemand.model_registry import load_horizon as _load_universal
+from omni.utils.logger import log
 
 
 def _build_residuals(df: pd.DataFrame, *, horizon: int) -> tuple[np.ndarray, np.ndarray]:

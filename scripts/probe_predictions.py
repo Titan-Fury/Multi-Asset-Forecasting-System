@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 import warnings
+
 warnings.filterwarnings("ignore")
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -30,7 +31,10 @@ from omni.models.xgboost_5d import _DROP_ALWAYS
 from omni.ondemand.cache import purge_ticker
 from omni.ondemand.lookup import lookup_ticker
 from omni.ondemand.predict import (
-    _cached_models, _last_row_features, _model_version_tag, _score_one,
+    _cached_models,
+    _last_row_features,
+    _model_version_tag,
+    _score_one,
 )
 from omni.ondemand.universe import resolve
 from omni.rubric.scorer import score_row
@@ -170,7 +174,7 @@ def _probe_one(ticker_query: str, models_tuple) -> dict | None:
                 asofs.append(pd.Timestamp(hist.iloc[-k]["date"]))
         asofs = list(dict.fromkeys(asofs))[-5:]
 
-    print(f"\nas-of date     p_up   conv  dir  realised_5d   right?  verdict")
+    print("\nas-of date     p_up   conv  dir  realised_5d   right?  verdict")
     print("-" * 100)
     n_right = 0
     n_total = 0

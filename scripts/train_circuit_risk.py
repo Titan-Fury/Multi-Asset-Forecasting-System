@@ -15,9 +15,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omni.lake import paths as lake_paths    # noqa: E402
-from omni.models import circuit_risk as _crisk   # noqa: E402
-from omni.utils.logger import log              # noqa: E402
+from omni.lake import paths as lake_paths  # noqa: E402
+from omni.models import circuit_risk as _crisk  # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 
 def main() -> int:
@@ -73,7 +73,7 @@ def main() -> int:
     out_path = Path("data/models") / out_name
     _crisk.save(model, out_path)
 
-    print(f"[3/3] done.")
+    print("[3/3] done.")
     print(f"      rows trained:   {model.n_train_rows:,}")
     print(f"      base rate:      {model.base_rate:.4f}  (= P(circuit-hit) in data)")
     print(f"      OOF PR-AUC:     {model.pr_auc:.4f}")

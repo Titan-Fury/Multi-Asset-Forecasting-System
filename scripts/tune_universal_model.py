@@ -21,7 +21,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from omni.lake import paths as lake_paths  # noqa: E402
-from omni.utils.logger import log           # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 try:
     import optuna
@@ -50,10 +50,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _objective_factory(df: pd.DataFrame, target: str, n_folds: int, min_train: int):
-    from omni.models.xgboost_5d import walkforward_fit
     from sklearn.metrics import roc_auc_score
 
-    def objective(trial: "optuna.trial.Trial") -> float:
+    from omni.models.xgboost_5d import walkforward_fit
+
+    def objective(trial: optuna.trial.Trial) -> float:
         params = {
             "max_depth": trial.suggest_int("max_depth", 3, 8),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),

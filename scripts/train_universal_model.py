@@ -26,7 +26,7 @@ import pandas as pd
 # Allow running as a script from project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omni.lake import paths as lake_paths # noqa: E402
+from omni.lake import paths as lake_paths  # noqa: E402
 from omni.models.training_utils import recency_weights  # noqa: E402
 from omni.models.xgboost_5d import walkforward_fit  # noqa: E402
 from omni.ondemand import model_registry  # noqa: E402
@@ -113,11 +113,13 @@ def _train_stack_one_horizon(df: pd.DataFrame, used: list[str], *,
     Saves the stack to data/models/stack_h{H}.joblib. AUC printed; the stack
     is loadable via joblib and exposes `predict_proba(X)`.
     """
-    import joblib
     from pathlib import Path
+
+    import joblib
+
+    from omni.features.build import is_target_col
     from omni.features.targets import add_cross_sectional_rank_targets
     from omni.models.stack import fit_stack
-    from omni.features.build import is_target_col
     from omni.models.xgboost_5d import _DROP_ALWAYS
 
     sub = df.copy()
@@ -429,8 +431,8 @@ def main() -> int:
     if args.asset_classes:
         wanted = {ac.strip().lower() for ac in args.asset_classes.split(",") if ac.strip()}
         if "asset_class" not in df.columns:
-            print(f"ERROR: --asset-classes requested but training set has no "
-                   f"'asset_class' column")
+            print("ERROR: --asset-classes requested but training set has no "
+                   "'asset_class' column")
             return 1
         before = len(df)
         df = df[df["asset_class"].astype(str).str.lower().isin(wanted)].reset_index(drop=True)

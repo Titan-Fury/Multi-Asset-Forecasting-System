@@ -21,17 +21,17 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omni.lake import io as lake_io           # noqa: E402
-from omni.lake import paths as lake_paths     # noqa: E402
+from omni.lake import io as lake_io  # noqa: E402
+from omni.lake import paths as lake_paths  # noqa: E402
 from omni.monitoring.predict_log import read_predictions_window  # noqa: E402
-from omni.utils.logger import log              # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
@@ -93,7 +93,7 @@ def _metrics(df: pd.DataFrame) -> dict:
 
 def main() -> int:
     args = _parse_args()
-    end = datetime.now(timezone.utc).date()
+    end = datetime.now(UTC).date()
     start = end - timedelta(days=int(args.lookback_days))
     log.info(f"daily_backtest: window {start} -> {end}")
 
@@ -151,7 +151,7 @@ def main() -> int:
                      .to_dict())
 
     summary = {
-        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "computed_at": datetime.now(UTC).isoformat(),
         "n_predictions_realised": int(len(rdf)),
         "overall": overall,
         "by_horizon": by_horizon,

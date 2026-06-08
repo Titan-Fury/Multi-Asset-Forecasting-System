@@ -72,8 +72,8 @@ def feature_information_value() -> pd.DataFrame:
     Pulls SBIN history, builds the features inline (with all new families
     enabled), then evaluates the columns of interest on the same frame.
     """
-    from omni.ondemand.lookup import lookup_ticker
     from omni.ondemand.features_inline import build_features_inline
+    from omni.ondemand.lookup import lookup_ticker
 
     # Make sure new features are enabled for this run
     os.environ["OMNI_DISABLE_EMB"] = "0"
@@ -174,7 +174,7 @@ def main() -> None:
     out_md = Path("docs/phase19_sbi_benchmark.md")
     out_md.parent.mkdir(parents=True, exist_ok=True)
     with out_md.open("w", encoding="utf-8") as f:
-        f.write(f"# Phase-19 SBI benchmark\n\n## Pipeline parity\n\n```\n")
+        f.write("# Phase-19 SBI benchmark\n\n## Pipeline parity\n\n```\n")
         f.write(parity.to_string(index=False))
         f.write(f"\n```\n\nproba_up delta = `{delta:.4f}`\n\n")
         f.write("## Feature information value (vs fwd_ret_5d)\n\n```\n")

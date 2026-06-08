@@ -1,7 +1,9 @@
 """Verify score_frame correctness + measure speedup on a synthetic load."""
 import time
+
 import numpy as np
 import pandas as pd
+
 from omni.rubric.scorer import score_frame
 
 rng = np.random.default_rng(0)

@@ -25,7 +25,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -33,10 +33,10 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from omni.lake import io as lake_io          # noqa: E402
-from omni.lake import paths as lake_paths    # noqa: E402
+from omni.lake import io as lake_io  # noqa: E402
+from omni.lake import paths as lake_paths  # noqa: E402
 from omni.lake.backfill import universe_pairs  # noqa: E402
-from omni.utils.logger import log              # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 _COLS = ["published_at", "source", "title", "description", "url",
          "ticker_hint", "lang"]
@@ -143,7 +143,7 @@ def main() -> int:
         pairs = pairs[: args.max_tickers]
     tickers = [t for (t, _ac) in pairs]
 
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=args.days)
     print(f"[1/3] backfill window: {start.date()} -> {end.date()}  "
             f"({args.days}d, {len(tickers)} tickers)")
@@ -179,11 +179,11 @@ def main() -> int:
             print(f"      [{i:>3}/{len(tickers)}] {t:<12} {n:>4} articles  "
                     f"({df['published_at'].min().date()} -> {df['published_at'].max().date()})")
         state.setdefault("tickers_done", []).append(t)
-        state["last_run"] = datetime.now(timezone.utc).isoformat()
+        state["last_run"] = datetime.now(UTC).isoformat()
         _save_checkpoint(state)
         if rate_limit_streak >= 5:
-            print(f"  WARNING: 5 consecutive empty results — possibly rate-limited. "
-                    f"Sleeping 60s and continuing.")
+            print("  WARNING: 5 consecutive empty results — possibly rate-limited. "
+                    "Sleeping 60s and continuing.")
             time.sleep(60)
             rate_limit_streak = 0
             continue
@@ -197,7 +197,7 @@ def main() -> int:
     combined = combined.dropna(subset=["url", "published_at"])
     combined = combined.drop_duplicates(subset=["url"]).reset_index(drop=True)
     combined["date_bucket"] = combined["published_at"].dt.tz_convert("UTC").dt.date.astype(str)
-    print(f"[3/3] writing per-day parquet files...")
+    print("[3/3] writing per-day parquet files...")
     print(f"      total articles: {len(combined):,}  unique URLs after dedup")
     print(f"      unique dates:   {combined['date_bucket'].nunique()}")
 

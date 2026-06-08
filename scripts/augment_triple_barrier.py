@@ -9,13 +9,13 @@ already in the panel (or recompute from `adj_close` if low/high missing).
 """
 from __future__ import annotations
 
+import shutil
 import sys
 import warnings
-import shutil
 from pathlib import Path
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 warnings.filterwarnings("ignore")
 try:
@@ -23,8 +23,8 @@ try:
 except Exception:
     pass
 
-from omni.utils.logger import log
 from omni.features.targets import triple_barrier
+from omni.utils.logger import log
 
 
 def main() -> int:

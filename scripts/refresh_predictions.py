@@ -19,13 +19,13 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
-import os
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 
@@ -39,8 +39,8 @@ def main() -> int:
                     help="run scoring but don't write the snapshot")
     args = ap.parse_args()
 
-    from omni.utils.env import universe as _universe
     from omni.ondemand.predict import predict_ticker
+    from omni.utils.env import universe as _universe
 
     cfg = _universe()
     target_classes = set(args.asset_classes.split(","))
@@ -91,7 +91,7 @@ def main() -> int:
                 "microstructure_score": pillars.get("microstructure"),
                 "oi_score": pillars.get("oi"),
                 "rubric_total": d.get("rubric_total"),
-                "logged_at": datetime.now(timezone.utc).isoformat(),
+                "logged_at": datetime.now(UTC).isoformat(),
             })
             elapsed = time.time() - t0
             conv = float(d.get("conviction", 0) or 0)
@@ -128,7 +128,7 @@ def main() -> int:
 
     out_dir = Path("data/lake/predictions")
     out_dir.mkdir(parents=True, exist_ok=True)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     out_path = out_dir / f"{today}.parquet"
     # Use the hardened atomic-write that validates before swap.
     from omni.orchestrator.persist import _atomic_write_parquet

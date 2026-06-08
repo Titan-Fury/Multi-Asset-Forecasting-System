@@ -40,7 +40,7 @@ def _augment(df: pd.DataFrame, horizons=(1, 5, 21)) -> pd.DataFrame:
     parts = []
     if "ticker" not in df.columns:
         return add_diff_and_lagged(df.copy(), horizons=horizons)
-    for tk, sub in df.groupby("ticker", sort=False):
+    for _tk, sub in df.groupby("ticker", sort=False):
         sub2 = add_diff_and_lagged(sub.copy(), horizons=horizons)
         parts.append(sub2)
     return pd.concat(parts, ignore_index=True)

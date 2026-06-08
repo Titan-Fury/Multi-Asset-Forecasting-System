@@ -20,12 +20,12 @@ try:
 except Exception:
     pass
 
-import numpy as np
-import pandas as pd
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
 from omni.calibration import BetaCalibrator
-from omni.utils.logger import log
 
 
 def ece(p: np.ndarray, y: np.ndarray, n_bins: int = 10) -> float:

@@ -23,15 +23,17 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv  # noqa: E402
+
 load_dotenv()
 
-from omni.lake import io as lake_io       # noqa: E402
-from omni.lake import paths as lake_paths # noqa: E402
+from omni.lake import io as lake_io  # noqa: E402
+from omni.lake import paths as lake_paths  # noqa: E402
 from omni.lake.quarterly import (
-    pivot_for_join, read_all_quarterly,
+    pivot_for_join,
+    read_all_quarterly,
 )  # noqa: E402
 from omni.ondemand.features_inline import build_features_inline  # noqa: E402
-from omni.utils.logger import log         # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
@@ -117,7 +119,7 @@ def main() -> int:
     sent_agg_all = pd.DataFrame()
     if not news_all.empty:
         try:
-            from omni.features.sentiment import score_articles, aggregate
+            from omni.features.sentiment import aggregate, score_articles
             log.info(f"scoring {len(news_all):,} articles via FinBERT...")
             scored = score_articles(news_all)
             sent_agg_all = aggregate(scored, ticker_col="ticker_hint")

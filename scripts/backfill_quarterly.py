@@ -12,11 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from omni.lake.backfill import universe_pairs   # noqa: E402
+from omni.lake.backfill import universe_pairs  # noqa: E402
 from omni.lake.quarterly import backfill_quarterly  # noqa: E402
-from omni.utils.logger import log                # noqa: E402
+from omni.utils.logger import log  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
