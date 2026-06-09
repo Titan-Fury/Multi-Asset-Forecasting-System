@@ -621,6 +621,7 @@ def _record_and_update_lru(res: Resolution, card_or_dict) -> None:
     st.session_state["_recent_tickers"] = rec_list[:6]
 
 
+@st.fragment
 def _render_portfolio_tab() -> None:
     """Portfolio mode: combine Kelly fractions across watchlist + recent searches.
 
@@ -785,6 +786,7 @@ def _render_portfolio_tab() -> None:
             st.dataframe(rest, use_container_width=True, hide_index=True)
 
 
+@st.fragment
 def _render_replay_section() -> None:
     """Drag a date slider over the logged-prediction window and see the
     cards as they were emitted, with realised forward returns attached."""
@@ -842,6 +844,7 @@ def _render_replay_section() -> None:
     )
 
 
+@st.fragment
 def _render_earnings_tab() -> None:
     """Earnings-day specials: who's reporting next 7 days + per-ticker history."""
     try:
