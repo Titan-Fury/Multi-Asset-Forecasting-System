@@ -505,6 +505,7 @@ def _render_watchlist_tab() -> None:
                 st.rerun()
 
 
+@st.fragment
 def _render_movers_tab() -> None:
     from omni.dashboard.movers import top_movers
 
