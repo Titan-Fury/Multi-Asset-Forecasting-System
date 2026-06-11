@@ -21,6 +21,12 @@ from omni.backtest.portfolio import simulate_cross_sectional_ls  # noqa: E402
 
 H = 5
 p = pd.read_parquet("data/lake/us_pit_prices.parquet")
+# Fold in the widened delisted set (resumable checkpoint) if present.
+_extra = Path("data/lake/us_delisted_extra.parquet")
+if _extra.exists():
+    ex = pd.read_parquet(_extra)
+    ex = ex[~ex["ticker"].isin(p["ticker"].unique())]
+    p = pd.concat([p, ex], ignore_index=True)
 p["date"] = pd.to_datetime(p["date"])
 p = p.sort_values(["ticker", "date"])
 # Returns on the full contiguous series first (price filter would break shift).
