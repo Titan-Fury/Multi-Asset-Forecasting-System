@@ -30,6 +30,7 @@ dist/
 # --- Data (never commit) ---
 data/
 !data/.gitkeep
+NSE_bhavcopy/
 
 # --- Models / large artifacts ---
 *.parquet
