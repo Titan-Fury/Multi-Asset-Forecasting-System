@@ -568,7 +568,7 @@ def lookup_ticker(ticker: str, asset_class: str,
         # Intraday 5-min bars (best-effort; on-demand cache)
         try:
             from omni.ingest.intraday import fetch_intraday_bars
-            ib = fetch_intraday_bars(ticker, asset_class, interval="5m")
+            ib = fetch_intraday_bars(asset_class, ticker, interval="5m")
             if ib is not None and not ib.empty:
                 news_agg.attrs["intraday"] = ib
         except Exception as e:  # noqa: BLE001
