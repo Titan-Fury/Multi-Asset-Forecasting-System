@@ -1,4 +1,9 @@
-import re, json, time, random, urllib.request, urllib.error
+import json
+import random
+import re
+import time
+import urllib.error
+import urllib.request
 
 env = {}
 for l in open(".env"):
@@ -9,9 +14,11 @@ PKEY = env["POLYGON_API_KEY"]
 
 
 def page(url):
+    if not url.startswith("https://"):
+        raise ValueError("refusing non-https url")
     for _ in range(6):
         try:
-            with urllib.request.urlopen(url, timeout=30) as r:
+            with urllib.request.urlopen(url, timeout=30) as r:  # nosec B310 - https-only, hardcoded Polygon host
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:

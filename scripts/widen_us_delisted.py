@@ -5,8 +5,14 @@ Polygon delisted symbols are obscure/old and absent from Tiingo. Here we bias th
 sample toward RECENT delistings (delisted_utc >= 2019), which Tiingo covers far
 better, fetch their history via Tiingo, and APPEND to the existing panel.
 """
-import re, json, time, random, urllib.request, urllib.error
+import json
+import random
+import re
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+
 import pandas as pd
 
 env = {}
@@ -19,9 +25,11 @@ START, END, MIN_ROWS = "2014-01-01", "2026-06-01", 300
 
 
 def page(url):
+    if not url.startswith("https://"):
+        raise ValueError("refusing non-https url")
     for _ in range(6):
         try:
-            with urllib.request.urlopen(url, timeout=30) as r:
+            with urllib.request.urlopen(url, timeout=30) as r:  # nosec B310 - https-only, hardcoded Polygon host
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
@@ -53,7 +61,7 @@ def fetch_tiingo(tk):
     req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
     for _ in range(20):
         try:
-            with urllib.request.urlopen(req, timeout=40) as r:
+            with urllib.request.urlopen(req, timeout=40) as r:  # nosec B310 - https-only, hardcoded Tiingo host
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:

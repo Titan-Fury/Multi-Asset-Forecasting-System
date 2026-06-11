@@ -8,10 +8,11 @@ Public archive, browser UA only (no key). Weekends/holidays 404 and are skipped.
 """
 import io
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
+
 import pandas as pd
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

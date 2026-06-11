@@ -1,5 +1,10 @@
-import re, json, time, sys, urllib.request, urllib.error
+import json
+import re
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+
 import pandas as pd
 import yfinance as yf
 
@@ -11,6 +16,7 @@ for l in open(".env"):
 TOK = env["TIINGO_API_KEY"]
 
 import yaml
+
 cfg = yaml.safe_load(open("configs/universe_us_pit.yaml"))
 tickers = cfg["tickers"]
 delisted = set(cfg.get("delisted", []))  # names to route to Tiingo
@@ -43,7 +49,7 @@ def fetch_tiingo(tk):
     req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
     for _ in range(5):
         try:
-            with urllib.request.urlopen(req, timeout=40) as r:
+            with urllib.request.urlopen(req, timeout=40) as r:  # nosec B310 - https-only, hardcoded Tiingo host
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
